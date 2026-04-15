@@ -11,18 +11,18 @@
     "client": "vite --config client/vite.config.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.27.0",
-    "axios": "^1.7.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "@anthropic-ai/sdk": "^0.27.3",
+    "axios": "^1.15.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
+    "@vitejs/plugin-react": "^4.7.0",
     "concurrently": "^8.2.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "vite": "^5.3.1"
+    "vite": "^5.4.21"
   },
   "engines": {
     "node": ">=18"
