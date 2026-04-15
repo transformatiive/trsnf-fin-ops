@@ -52,7 +52,7 @@ export default function KpiPills({ data, netResult }) {
           border={C.blueBorder}
         />
         <StatCard
-          label="SOs por faturar"
+          label="Sales Orders por Faturar"
           value={fmt(t.so_pending)}
           accent={C.amberText}
           light={C.amberLight}
