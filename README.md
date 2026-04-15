@@ -23,33 +23,46 @@ Open <http://localhost:5173>.
 ## Running on Replit (production)
 
 1. Import repo into Replit (Node.js template).
-2. Add all secrets from `.env.example` to **Replit Secrets**.
+2. **No secrets required** — credentials are pulled at startup from the
+   Transformatiive credential vault (see below).
 3. `.replit` already sets `run = "npm run dev"` for dev and runs
    `npm run build && npm start` for deployment.
 4. Enable **Always-on** in Replit settings.
 
-### Required Replit Secrets
+### Credentials: pulled from the vault, not Replit Secrets
+
+On server start, `server/services/vault.js` GETs:
 
 ```
-ZOHO_CLIENT_ID
-ZOHO_CLIENT_SECRET
-ZOHO_REFRESH_TOKEN
-ZOHO_ORG_ID
+https://trnsf.up.railway.app/webhook/credential-vault?action=get&epic_key=TRNSF-INTERNAL
+```
 
-PARTNER_EU_EMAIL
+and populates `process.env`. The vault provides Zoho Books + Moloni credentials
+automatically. You can still set any value as a Replit Secret to override the
+vault — env vars take precedence on first load.
+
+**Must be set as Replit Secrets** (not currently stored in the vault):
+
+```
+ANTHROPIC_API_KEY        # required for AI analysis panel
+PARTNER_EU_EMAIL         # optional — Partner Store EU subscriptions
 PARTNER_EU_PASSWORD
-PARTNER_COM_EMAIL
+PARTNER_COM_EMAIL        # optional — Partner Store COM subscriptions
 PARTNER_COM_PASSWORD
+```
 
-MOLONI_CLIENT_ID
-MOLONI_CLIENT_SECRET
-MOLONI_USERNAME
-MOLONI_PASSWORD
-MOLONI_COMPANY_ID
+Force a reload after rotating a vault secret:
 
-ANTHROPIC_API_KEY
+```
+POST /api/vault/reload     (auth required)
+```
 
-APP_PASSWORD            # optional override; default is baked in
+### Optional overrides
+
+```
+CREDENTIAL_VAULT_URL    # override vault base URL
+CREDENTIAL_VAULT_EPIC   # override epic key (default TRNSF-INTERNAL)
+APP_PASSWORD            # override the login password baked in
 PORT                    # defaults to 3000
 ```
 

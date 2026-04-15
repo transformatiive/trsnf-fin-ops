@@ -4,12 +4,16 @@ const cors = require("cors");
 const path = require("path");
 const crypto = require("crypto");
 
+const { loadCredentials } = require("./services/vault");
 const { buildDashboard, invalidateCache } = require("./api/dashboard");
 const { streamAnalysis } = require("./api/analysis");
 const { healthCheck } = require("./api/health");
 
 const PORT = process.env.PORT || 3000;
-const APP_PASSWORD = process.env.APP_PASSWORD || "!TransformatiiveAdmin2026#";
+
+// App password default. This is intentionally baked in per product owner request;
+// can still be overridden via APP_PASSWORD env var or the credential vault.
+const DEFAULT_APP_PASSWORD = "!TransformatiiveAdmin2026#";
 
 const app = express();
 app.use(cors());
@@ -17,15 +21,25 @@ app.use(express.json());
 
 // -------- Simple password gate --------
 // Issues a signed session token valid for 12h on successful login.
-const SESSION_SECRET =
-  process.env.SESSION_SECRET ||
-  crypto.createHash("sha256").update(APP_PASSWORD + "::trnsf-sessions").digest("hex");
+// APP_PASSWORD / SESSION_SECRET are resolved lazily (after vault load).
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+function getAppPassword() {
+  return process.env.APP_PASSWORD || DEFAULT_APP_PASSWORD;
+}
+
+function getSessionSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  return crypto
+    .createHash("sha256")
+    .update(getAppPassword() + "::trnsf-sessions")
+    .digest("hex");
+}
 
 function issueToken() {
   const exp = Date.now() + SESSION_TTL_MS;
   const payload = `${exp}`;
-  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("hex");
+  const sig = crypto.createHmac("sha256", getSessionSecret()).update(payload).digest("hex");
   return `${payload}.${sig}`;
 }
 
@@ -33,7 +47,7 @@ function verifyToken(token) {
   if (!token || typeof token !== "string") return false;
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return false;
-  const expected = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("hex");
+  const expected = crypto.createHmac("sha256", getSessionSecret()).update(payload).digest("hex");
   if (expected.length !== sig.length) return false;
   let diff = 0;
   for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
@@ -54,7 +68,7 @@ function requireAuth(req, res, next) {
 
 app.post("/api/login", (req, res) => {
   const { password } = req.body || {};
-  if (password !== APP_PASSWORD) {
+  if (password !== getAppPassword()) {
     return res.status(401).json({ error: "invalid_password" });
   }
   const token = issueToken();
@@ -83,6 +97,13 @@ app.get("/api/dashboard", requireAuth, async (req, res) => {
 
 app.get("/api/analysis", requireAuth, streamAnalysis);
 
+// Force re-fetch credentials from vault (useful if a secret was rotated)
+app.post("/api/vault/reload", requireAuth, async (req, res) => {
+  const result = await loadCredentials({ overwrite: true });
+  invalidateCache();
+  res.json(result);
+});
+
 // -------- Static client (production) --------
 const clientDist = path.join(__dirname, "..", "client", "dist");
 app.use(express.static(clientDist));
@@ -92,7 +113,16 @@ app.get("*", (req, res) => {
   });
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`[server] listening on http://0.0.0.0:${PORT}`);
-  console.log(`[server] auth: password gate enabled`);
+async function start() {
+  console.log("[server] bootstrapping credentials from vault…");
+  await loadCredentials({ overwrite: false });
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[server] listening on http://0.0.0.0:${PORT}`);
+    console.log(`[server] auth: password gate enabled`);
+  });
+}
+
+start().catch((err) => {
+  console.error("[server] fatal startup error:", err);
+  process.exit(1);
 });
