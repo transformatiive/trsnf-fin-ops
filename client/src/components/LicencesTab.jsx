@@ -50,7 +50,7 @@ function MonthlyCard({ c }) {
         style={{
           marginTop: 10,
           display: "grid",
-          gridTemplateColumns: "repeat(12, 1fr)",
+          gridTemplateColumns: "repeat(6, 1fr)",
           gap: 4,
         }}
       >

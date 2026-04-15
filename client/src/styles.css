@@ -1,0 +1,64 @@
+/* ===== Global Resets ===== */
+* { box-sizing: border-box; }
+
+/* ===== Mobile / Touch ===== */
+/* Smooth scrolling for horizontal tables on touch */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ===== Responsive Breakpoints ===== */
+
+/* Tablet and below: tighter side padding */
+@media (max-width: 768px) {
+  .main-container {
+    padding: 16px 16px 80px !important;
+  }
+
+  h1 {
+    font-size: 20px !important;
+  }
+}
+
+/* Mobile: stack header vertically */
+@media (max-width: 560px) {
+  .header-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+
+  .header-actions {
+    width: 100%;
+    display: flex;
+    justify-content: flex-start;
+  }
+}
+
+/* Smaller mobile: tighter padding */
+@media (max-width: 420px) {
+  .main-container {
+    padding: 12px 12px 80px !important;
+  }
+}
+
+/* ===== iOS Safe Area Support ===== */
+/* Pad the bottom for phones with home indicator */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .main-container {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* ===== Scrollbar styling for table containers ===== */
+.table-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+.table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.table-scroll::-webkit-scrollbar-thumb {
+  background: #d1cdc6;
+  border-radius: 2px;
+}

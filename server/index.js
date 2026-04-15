@@ -104,6 +104,17 @@ app.post("/api/vault/reload", requireAuth, async (req, res) => {
   res.json(result);
 });
 
+// Debug: raw Partner Store subscriptions (helps diagnose empty annual licences)
+app.get("/api/debug/partner", requireAuth, async (req, res) => {
+  const { fetchAllSubscriptions } = require("./services/zoho-partner");
+  try {
+    const subs = await fetchAllSubscriptions();
+    res.json({ count: subs.length, subscriptions: subs.slice(0, 10) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // -------- Static client (production) --------
 const clientDist = path.join(__dirname, "..", "client", "dist");
 app.use(express.static(clientDist));

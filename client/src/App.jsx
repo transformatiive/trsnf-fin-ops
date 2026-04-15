@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import "./styles.css";
 import Login from "./components/Login";
 import KpiPills from "./components/KpiPills";
 import TabBar from "./components/TabBar";
@@ -13,7 +14,6 @@ import { useAnalysis } from "./hooks/useAnalysis";
 import { C } from "./utils/constants";
 import { fmt } from "./utils/fmt";
 
-const MONTHLY_GOAL = 20833;
 const ANNUAL_GOAL = 250000;
 const IRC_RATE = 0.21;
 const MARGIN = 1.18;
@@ -30,7 +30,6 @@ function computeNetResult(data) {
       (data.licence_pipeline?.by_month?.[m] || 0),
     0
   );
-  // Rough total costs
   const FIXED_BASE = 1957;
   const SALARY = 1114;
   const fixed = FIXED_BASE * 12 + SALARY * 11;
@@ -47,46 +46,82 @@ function computeNetResult(data) {
 
 function Header({ data, lastRefresh, loading, onReload, onLogout }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16, marginBottom: 16 }}>
+    <div
+      className="header-row"
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-start",
+        flexWrap: "wrap",
+        gap: 12,
+        marginBottom: 20,
+      }}
+    >
       <div>
-        <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, textTransform: "uppercase" }}>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            color: C.faint,
+            letterSpacing: 2,
+            textTransform: "uppercase",
+            marginBottom: 4,
+          }}
+        >
           Transformatiive Lda
         </div>
-        <h1 style={{ margin: "4px 0 2px", fontSize: 24 }}>Financial Dashboard</h1>
-        <div style={{ fontSize: 12, color: C.muted }}>
+        <h1
+          style={{
+            margin: "0 0 3px",
+            fontSize: "clamp(20px, 4vw, 26px)",
+            fontWeight: 800,
+            letterSpacing: -0.8,
+            color: C.text,
+            lineHeight: 1.1,
+          }}
+        >
+          Financial Dashboard
+        </h1>
+        <div style={{ fontSize: 12, color: C.faint }}>
           {data?.fiscal_year || 2026} · Meta anual {fmt(ANNUAL_GOAL)}
           {lastRefresh && (
             <> · Atualizado {new Date(lastRefresh).toLocaleTimeString("pt-PT")}</>
           )}
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
+
+      <div className="header-actions" style={{ display: "flex", gap: 8, flexShrink: 0 }}>
         <button
           onClick={onReload}
           disabled={loading}
           style={{
             padding: "8px 14px",
-            border: `1px solid ${C.borderStrong}`,
+            border: `1.5px solid ${C.borderStrong}`,
             background: C.surface,
             color: C.text,
-            borderRadius: 8,
+            borderRadius: 9,
             fontSize: 13,
+            fontWeight: 600,
             cursor: loading ? "wait" : "pointer",
-            fontWeight: 500,
+            opacity: loading ? 0.7 : 1,
+            transition: "opacity 0.15s",
+            whiteSpace: "nowrap",
           }}
         >
-          {loading ? "A atualizar…" : "↻ Atualizar dados"}
+          {loading ? "A atualizar…" : "↻ Atualizar"}
         </button>
         <button
           onClick={onLogout}
           style={{
             padding: "8px 14px",
-            border: `1px solid ${C.border}`,
+            border: `1.5px solid ${C.border}`,
             background: "transparent",
             color: C.muted,
-            borderRadius: 8,
+            borderRadius: 9,
             fontSize: 13,
+            fontWeight: 500,
             cursor: "pointer",
+            whiteSpace: "nowrap",
           }}
         >
           Sair
@@ -96,20 +131,49 @@ function Header({ data, lastRefresh, loading, onReload, onLogout }) {
   );
 }
 
+function TopBar() {
+  return (
+    <div
+      style={{
+        background: C.text,
+        padding: "0 24px",
+        height: 3,
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 100,
+      }}
+    />
+  );
+}
+
 function LoadingScreen({ error }) {
   return (
-    <div style={{ padding: 40, textAlign: "center", color: C.muted }}>
+    <div
+      style={{
+        padding: "60px 20px",
+        textAlign: "center",
+        color: C.muted,
+      }}
+    >
       {error ? (
-        <div style={{ color: C.red }}>
-          Erro ao carregar dados: {error}
-          <div style={{ fontSize: 12, marginTop: 8, color: C.muted }}>
-            Verifica os secrets do Replit (Zoho, Moloni, Anthropic).
+        <div>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+          <div style={{ color: C.red, fontWeight: 600, fontSize: 15 }}>
+            Erro ao carregar dados
+          </div>
+          <div style={{ fontSize: 13, marginTop: 8, color: C.muted, maxWidth: 340, margin: "8px auto 0" }}>
+            {error}
+          </div>
+          <div style={{ fontSize: 12, marginTop: 8, color: C.faint }}>
+            Verifica os secrets do Replit (Zoho, Moloni, OpenRouter).
           </div>
         </div>
       ) : (
         <div>
-          <div style={{ fontSize: 14 }}>A carregar dados financeiros…</div>
-          <div style={{ fontSize: 11, color: C.faint, marginTop: 6 }}>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>A carregar dados financeiros…</div>
+          <div style={{ fontSize: 12, color: C.faint, marginTop: 6 }}>
             Books · Partner Store · Moloni
           </div>
         </div>
@@ -130,7 +194,16 @@ export default function App() {
 
   if (checking) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: C.muted }}>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: C.faint,
+          fontSize: 20,
+        }}
+      >
         …
       </div>
     );
@@ -141,8 +214,12 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg }}>
-      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "20px 24px 60px" }}>
+    <div style={{ minHeight: "100vh", background: C.bg, paddingTop: 3 }}>
+      <TopBar />
+      <div
+        className="main-container"
+        style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 24px 80px" }}
+      >
         <Header
           data={data}
           lastRefresh={lastRefresh}
@@ -151,11 +228,13 @@ export default function App() {
           onLogout={logout}
         />
 
-        {data && <KpiPills data={data} netResult={netResult} />}
+        {data && (
+          <div style={{ marginBottom: 24 }}>
+            <KpiPills data={data} netResult={netResult} />
+          </div>
+        )}
 
-        <div style={{ marginTop: 20 }}>
-          <TabBar tab={tab} setTab={setTab} />
-        </div>
+        <TabBar tab={tab} setTab={setTab} />
 
         {!data ? (
           <LoadingScreen error={error} />

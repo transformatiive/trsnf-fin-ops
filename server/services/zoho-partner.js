@@ -44,14 +44,42 @@ async function fetchSubscriptions(store) {
   try {
     const cfg = STORES[store];
     const token = await getPartnerToken(store);
-    const res = await axios.get(`${cfg.base()}/api/v1/partner/subscriptions`, {
+    const url = `${cfg.base()}/api/v1/partner/subscriptions`;
+    console.log(`[partner:${store}] GET ${url}`);
+    const res = await axios.get(url, {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
       params: { per_page: 200 },
     });
-    return res.data.subscriptions || res.data.data || [];
+    const raw = res.data;
+    // Handle both array response and wrapped { subscriptions: [...] } response
+    let subs;
+    if (Array.isArray(raw)) {
+      subs = raw;
+    } else {
+      subs = raw.subscriptions || raw.data || raw.subscription || [];
+      // If still empty but raw has numeric keys, it's an array-like object
+      if (!subs.length && raw && typeof raw === "object") {
+        const vals = Object.values(raw);
+        if (vals.length > 0 && typeof vals[0] === "object") subs = vals;
+      }
+    }
+    const keys = Object.keys(raw || {});
+    console.log(`[partner:${store}] response keys: [${keys.slice(0, 10).join(", ")}${keys.length > 10 ? "…" : ""}], subscriptions: ${subs.length}`);
+    if (subs.length > 0) {
+      // Log sample renewal fields from first sub
+      const sample = subs[0];
+      const renewalFields = [
+        "next_billing_date", "renewal_date", "expires_on",
+        "expiry_date", "end_date", "next_renewal_date",
+      ];
+      const found = renewalFields.filter((f) => sample[f]);
+      console.log(`[partner:${store}] sample sub keys: [${Object.keys(sample).join(", ")}]`);
+      console.log(`[partner:${store}] renewal fields found: [${found.map((f) => `${f}=${sample[f]}`).join(", ")}]`);
+    }
+    return subs;
   } catch (err) {
     const msg = err.response
-      ? `HTTP ${err.response.status} ${JSON.stringify(err.response.data).slice(0, 160)}`
+      ? `HTTP ${err.response.status} ${JSON.stringify(err.response.data).slice(0, 300)}`
       : err.message;
     console.error(`[partner:${store}] fetchSubscriptions failed: ${msg}`);
     return [];

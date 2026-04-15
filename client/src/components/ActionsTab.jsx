@@ -335,7 +335,7 @@ function LicencesSection({ data }) {
 
 export default function ActionsTab({ data }) {
   return (
-    <div style={{ overflowX: "auto", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 }}>
+    <div className="table-scroll" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <MonthHeader />
         <tbody>

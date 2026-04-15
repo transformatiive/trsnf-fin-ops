@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { C, MONTHS, MONTHS_PT } from "../utils/constants";
 import { fmt, fmtK } from "../utils/fmt";
 
@@ -184,72 +184,217 @@ function ProgressBar({ forecast }) {
   );
 }
 
+function Tooltip({ row, anchorRef }) {
+  if (!row || !anchorRef.current) return null;
+  const costs = row.fixed + row.cogs + row.oneOff + row.iva;
+  const netPositive = row.net >= 0;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: "calc(100% + 8px)",
+        left: "50%",
+        transform: "translateX(-50%)",
+        background: "#1a1a1a",
+        color: "#fff",
+        borderRadius: 10,
+        padding: "10px 14px",
+        fontSize: 12,
+        whiteSpace: "nowrap",
+        zIndex: 20,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.25)",
+        pointerEvents: "none",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 7, fontSize: 13, letterSpacing: -0.2 }}>
+        {row.monthLabel} {row.isPast ? "" : <span style={{ fontSize: 10, opacity: 0.6 }}>previsto</span>}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 24 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, opacity: 0.8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: row.isPast ? C.green : C.greenBorder, display: "inline-block" }} />
+            Receita
+          </span>
+          <span style={{ fontWeight: 600 }}>{fmt(row.revenue)}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 24 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, opacity: 0.8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: "#f87171", display: "inline-block" }} />
+            Custos totais
+          </span>
+          <span style={{ fontWeight: 600 }}>-{fmt(costs)}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 24 }}>
+          <span style={{ opacity: 0.8 }}>vs Meta {fmt(MONTHLY_GOAL)}</span>
+          <span style={{ fontWeight: 600, color: row.revenue >= MONTHLY_GOAL ? "#4ade80" : "#f87171" }}>
+            {row.revenue >= MONTHLY_GOAL ? "+" : ""}{fmt(row.revenue - MONTHLY_GOAL)}
+          </span>
+        </div>
+        <div
+          style={{
+            borderTop: "1px solid rgba(255,255,255,0.15)",
+            marginTop: 4,
+            paddingTop: 4,
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 24,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>Líquido</span>
+          <span style={{ fontWeight: 700, color: netPositive ? "#4ade80" : "#f87171" }}>
+            {fmt(row.net)}
+          </span>
+        </div>
+      </div>
+      {/* Arrow */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: -5,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: 10,
+          height: 10,
+          background: "#1a1a1a",
+          clipPath: "polygon(0 0, 100% 0, 50% 100%)",
+        }}
+      />
+    </div>
+  );
+}
+
 function BarChart({ rows }) {
   const maxRev = Math.max(...rows.map((r) => r.revenue), MONTHLY_GOAL);
   const maxCost = Math.max(...rows.map((r) => r.fixed + r.cogs + r.oneOff + r.iva));
   const max = Math.max(maxRev, maxCost) * 1.1;
-  const H = 160;
+  const H = 170;
   const [hover, setHover] = useState(null);
+  const anchorRef = useRef(null);
 
   return (
     <div style={{ marginTop: 14 }}>
-      <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: 6, height: H, padding: "6px 0" }}>
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 10, fontSize: 11, color: C.muted, flexWrap: "wrap" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: C.green, display: "inline-block" }} />
+          Receita realizada
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: C.greenLight, border: `1px solid ${C.greenBorder}`, display: "inline-block" }} />
+          Receita prevista
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: "#fecaca", display: "inline-block" }} />
+          Custos totais
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 10, height: 2, background: C.muted, display: "inline-block", borderTop: `1px dashed ${C.muted}` }} />
+          Meta mensal
+        </span>
+      </div>
+
+      {/* Chart */}
+      <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: 5, height: H, padding: "6px 0" }}>
         {rows.map((r) => {
-          const revH = (r.revenue / max) * H;
-          const costH = ((r.fixed + r.cogs + r.oneOff + r.iva) / max) * H;
+          const revH = Math.max(2, (r.revenue / max) * H);
+          const costH = Math.max(2, ((r.fixed + r.cogs + r.oneOff + r.iva) / max) * H);
+          const isHovered = hover?.month === r.month;
+
           return (
             <div
               key={r.month}
+              ref={isHovered ? anchorRef : null}
               onMouseEnter={() => setHover(r)}
               onMouseLeave={() => setHover(null)}
-              style={{ flex: 1, display: "flex", gap: 2, alignItems: "flex-end", height: H, position: "relative", cursor: "pointer" }}
+              style={{
+                flex: 1,
+                display: "flex",
+                gap: 2,
+                alignItems: "flex-end",
+                height: H,
+                position: "relative",
+                cursor: "pointer",
+              }}
             >
+              {isHovered && <Tooltip row={r} anchorRef={anchorRef} />}
+
+              {/* Revenue bar */}
               <div
                 style={{
                   flex: 1,
                   height: revH,
                   background: r.isPast ? C.green : C.greenLight,
                   border: `1px solid ${C.greenBorder}`,
-                  borderRadius: "3px 3px 0 0",
+                  borderRadius: "4px 4px 0 0",
+                  opacity: isHovered ? 1 : 0.85,
+                  transition: "opacity 0.1s, height 0.2s",
                 }}
               />
+
+              {/* Cost bar */}
               <div
                 style={{
                   flex: 1,
                   height: costH,
-                  background: C.redLight,
-                  border: `1px solid #fecaca`,
-                  borderRadius: "3px 3px 0 0",
+                  background: isHovered ? "#fca5a5" : "#fecaca",
+                  border: "1px solid #fca5a5",
+                  borderRadius: "4px 4px 0 0",
+                  opacity: isHovered ? 1 : 0.8,
+                  transition: "opacity 0.1s",
                 }}
               />
             </div>
           );
         })}
-        {/* goal line */}
+
+        {/* Goal line */}
         <div
           style={{
             position: "absolute",
             left: 0,
             right: 0,
             bottom: `${(MONTHLY_GOAL / max) * H}px`,
-            borderTop: `1px dashed ${C.muted}`,
+            borderTop: `1.5px dashed ${C.muted}`,
             pointerEvents: "none",
           }}
-        />
+        >
+          <span
+            style={{
+              position: "absolute",
+              right: 0,
+              top: -16,
+              fontSize: 9,
+              color: C.muted,
+              fontWeight: 600,
+              background: C.surface,
+              padding: "1px 4px",
+              borderRadius: 3,
+            }}
+          >
+            META
+          </span>
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+
+      {/* Month labels */}
+      <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
         {rows.map((r) => (
-          <div key={r.month} style={{ flex: 1, textAlign: "center", fontSize: 10, color: C.muted }}>
+          <div
+            key={r.month}
+            style={{
+              flex: 1,
+              textAlign: "center",
+              fontSize: 10,
+              fontWeight: hover?.month === r.month ? 700 : 400,
+              color: hover?.month === r.month ? C.text : C.faint,
+              transition: "color 0.1s, font-weight 0.1s",
+            }}
+          >
             {r.monthLabel}
           </div>
         ))}
       </div>
-      {hover && (
-        <div style={{ marginTop: 8, fontSize: 12, color: C.muted }}>
-          <strong>{hover.monthLabel}:</strong> Receita {fmt(hover.revenue)} · Custos{" "}
-          {fmt(hover.fixed + hover.cogs + hover.oneOff + hover.iva)} · Líquido {fmt(hover.net)}
-        </div>
-      )}
     </div>
   );
 }
@@ -329,7 +474,7 @@ function PLTable({ rows, totals, data }) {
   const [openCogs, setOpenCogs] = useState(false);
 
   return (
-    <div style={{ overflowX: "auto", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 16 }}>
+    <div className="table-scroll" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 16 }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${C.border}` }}>

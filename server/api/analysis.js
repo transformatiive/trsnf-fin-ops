@@ -1,9 +1,8 @@
-const Anthropic = require("@anthropic-ai/sdk");
+const axios = require("axios");
 const { buildDashboard } = require("./dashboard");
 
-function getClient() {
-  return new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
-}
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const MODEL = "anthropic/claude-sonnet-4-6";
 
 function fmtEur(n) {
   return "€" + Math.round(Number(n) || 0).toLocaleString("pt-PT");
@@ -103,36 +102,74 @@ async function streamAnalysis(req, res) {
   res.setHeader("X-Accel-Buffering", "no");
   if (typeof res.flushHeaders === "function") res.flushHeaders();
 
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    res.write(`data: ${JSON.stringify({ text: "⚠ OPENROUTER_API_KEY não configurada em Replit Secrets." })}\n\n`);
+    res.write("data: [DONE]\n\n");
+    return res.end();
+  }
+
   try {
     const data = await buildDashboard();
     const ctx = buildContext(data);
     const today = new Date().toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" });
     const prompt = tab === "pl" ? buildPLPrompt(ctx, today) : buildActionsPrompt(ctx, today);
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-      res.write(`data: ${JSON.stringify({ text: "⚠ ANTHROPIC_API_KEY não configurada em Replit Secrets." })}\n\n`);
-      res.write("data: [DONE]\n\n");
-      return res.end();
-    }
-
-    const client = getClient();
-    const stream = await client.messages.stream({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 800,
-      messages: [{ role: "user", content: prompt }],
+    const response = await axios({
+      method: "post",
+      url: `${OPENROUTER_BASE}/chat/completions`,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://transformatiive.pt",
+        "X-Title": "Transformatiive Financial Dashboard",
+      },
+      data: {
+        model: MODEL,
+        max_tokens: 800,
+        messages: [{ role: "user", content: prompt }],
+        stream: true,
+      },
+      responseType: "stream",
     });
 
-    for await (const chunk of stream) {
-      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
-        res.write(`data: ${JSON.stringify({ text: chunk.delta.text })}\n\n`);
+    let buf = "";
+    response.data.on("data", (chunk) => {
+      buf += chunk.toString();
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data: ")) continue;
+        const raw = trimmed.slice(6);
+        if (raw === "[DONE]") {
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        try {
+          const parsed = JSON.parse(raw);
+          const text = parsed.choices?.[0]?.delta?.content;
+          if (text) res.write(`data: ${JSON.stringify({ text })}\n\n`);
+        } catch (_) {}
       }
-    }
+    });
 
-    res.write("data: [DONE]\n\n");
-    res.end();
+    response.data.on("end", () => {
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+
+    response.data.on("error", (err) => {
+      console.error("OpenRouter stream error:", err.message);
+      res.write(`data: ${JSON.stringify({ text: `\n\n[Erro de stream: ${err.message}]` })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
   } catch (err) {
-    console.error("Analysis stream error:", err.message);
-    res.write(`data: ${JSON.stringify({ text: `\n\n[Erro: ${err.message}]` })}\n\n`);
+    const msg = err.response?.data?.error?.message || err.message;
+    console.error("Analysis error:", msg);
+    res.write(`data: ${JSON.stringify({ text: `\n\n[Erro: ${msg}]` })}\n\n`);
     res.write("data: [DONE]\n\n");
     res.end();
   }
