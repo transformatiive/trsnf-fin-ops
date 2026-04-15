@@ -31,24 +31,24 @@ Open <http://localhost:5173>.
 
 ### Credentials: pulled from the vault, not Replit Secrets
 
-On server start, `server/services/vault.js` GETs:
+On server start, `server/services/vault.js` GETs three n8n vault epics:
 
 ```
-https://trnsf.up.railway.app/webhook/credential-vault?action=get&epic_key=TRNSF-INTERNAL
+TRNSF-INTERNAL      → Zoho Books + Moloni
+TRNSF-PARTNER-EU    → Partner Store EU (client_id/secret/refresh_token)
+TRNSF-PARTNER-COM   → Partner Store COM (client_id/secret/refresh_token)
 ```
 
-and populates `process.env`. The vault provides Zoho Books + Moloni credentials
-automatically. You can still set any value as a Replit Secret to override the
-vault — env vars take precedence on first load.
+All three Zoho token families (Books, Partner EU, Partner COM) use the same
+refresh-token flow via the shared `server/services/zoho-auth.js` helper.
 
-**Must be set as Replit Secrets** (not currently stored in the vault):
+You can still set any value as a Replit Secret to override the vault — env
+vars take precedence on first load.
+
+**Must be set as Replit Secrets** (not currently in the vault):
 
 ```
 ANTHROPIC_API_KEY        # required for AI analysis panel
-PARTNER_EU_EMAIL         # optional — Partner Store EU subscriptions
-PARTNER_EU_PASSWORD
-PARTNER_COM_EMAIL        # optional — Partner Store COM subscriptions
-PARTNER_COM_PASSWORD
 ```
 
 Force a reload after rotating a vault secret:

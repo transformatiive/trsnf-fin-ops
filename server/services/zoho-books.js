@@ -1,51 +1,41 @@
 const axios = require("axios");
+const { getZohoToken, invalidateZohoToken } = require("./zoho-auth");
 
-const BOOKS_BASE = "https://www.zohoapis.com/books/v3";
-const ACCOUNTS_BASE = "https://accounts.zoho.com";
+// Transformatiive is on the .com datacenter (not .eu).
+const DEFAULT_API_BASE = "https://www.zohoapis.com";
+const DEFAULT_ACCOUNTS_URL = "https://accounts.zoho.com";
 
-let tokenCache = { token: null, expires: 0 };
+function cfg() {
+  return {
+    base: (process.env.ZOHO_API_BASE || DEFAULT_API_BASE) + "/books/v3",
+    accountsUrl: process.env.ZOHO_ACCOUNTS_URL || DEFAULT_ACCOUNTS_URL,
+    clientId: process.env.ZOHO_CLIENT_ID,
+    clientSecret: process.env.ZOHO_CLIENT_SECRET,
+    refreshToken: process.env.ZOHO_REFRESH_TOKEN,
+    orgId: process.env.ZOHO_ORG_ID,
+  };
+}
 
 async function getToken() {
-  if (tokenCache.token && Date.now() < tokenCache.expires) {
-    return tokenCache.token;
-  }
-
-  const res = await axios.post(`${ACCOUNTS_BASE}/oauth/v2/token`, null, {
-    params: {
-      grant_type: "refresh_token",
-      client_id: process.env.ZOHO_CLIENT_ID,
-      client_secret: process.env.ZOHO_CLIENT_SECRET,
-      refresh_token: process.env.ZOHO_REFRESH_TOKEN,
-    },
-  });
-
-  tokenCache = {
-    token: res.data.access_token,
-    expires: Date.now() + 3500 * 1000,
-  };
-  return tokenCache.token;
+  const c = cfg();
+  return getZohoToken("books", c.accountsUrl, c.clientId, c.clientSecret, c.refreshToken);
 }
 
 async function booksGet(path, params = {}) {
+  const c = cfg();
   const token = await getToken();
   try {
-    const res = await axios.get(`${BOOKS_BASE}${path}`, {
-      params: {
-        organization_id: process.env.ZOHO_ORG_ID,
-        ...params,
-      },
+    const res = await axios.get(`${c.base}${path}`, {
+      params: { organization_id: c.orgId, ...params },
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
     });
     return res.data;
   } catch (err) {
     if (err.response && err.response.status === 401) {
-      tokenCache = { token: null, expires: 0 };
+      invalidateZohoToken("books");
       const token2 = await getToken();
-      const res = await axios.get(`${BOOKS_BASE}${path}`, {
-        params: {
-          organization_id: process.env.ZOHO_ORG_ID,
-          ...params,
-        },
+      const res = await axios.get(`${c.base}${path}`, {
+        params: { organization_id: c.orgId, ...params },
         headers: { Authorization: `Zoho-oauthtoken ${token2}` },
       });
       return res.data;

@@ -1,60 +1,59 @@
 const axios = require("axios");
+const { getZohoToken } = require("./zoho-auth");
 
-// Zoho Partner Store uses email/password for OAuth token (resource owner flow).
-// There are two separate stores (EU + COM) with separate credentials.
+// Partner Store credentials (see Credentials Addendum).
+// Two separate stores (EU + COM) each with their own client_id/secret/refresh_token.
+// Partner COM happens to share client_id/client_secret with the main Books org,
+// but uses a different refresh_token and a different API base.
 
 const STORES = {
   eu: {
-    base: "https://store.zoho.eu/api/v1",
-    email: () => process.env.PARTNER_EU_EMAIL,
-    password: () => process.env.PARTNER_EU_PASSWORD,
+    key: "partnerEu",
+    base: () => process.env.PARTNER_EU_API_BASE || "https://store.zoho.eu",
+    accountsUrl: () => process.env.PARTNER_EU_ACCOUNTS_URL || "https://accounts.zoho.eu",
+    clientId: () => process.env.PARTNER_EU_CLIENT_ID,
+    clientSecret: () => process.env.PARTNER_EU_CLIENT_SECRET,
+    refreshToken: () => process.env.PARTNER_EU_REFRESH_TOKEN,
   },
   com: {
-    base: "https://store.zoho.com/api/v1",
-    email: () => process.env.PARTNER_COM_EMAIL,
-    password: () => process.env.PARTNER_COM_PASSWORD,
+    key: "partnerCom",
+    base: () => process.env.PARTNER_COM_API_BASE || "https://store.zoho.com",
+    accountsUrl: () => process.env.PARTNER_COM_ACCOUNTS_URL || "https://accounts.zoho.com",
+    clientId: () => process.env.PARTNER_COM_CLIENT_ID,
+    clientSecret: () => process.env.PARTNER_COM_CLIENT_SECRET,
+    refreshToken: () => process.env.PARTNER_COM_REFRESH_TOKEN,
   },
 };
-
-const tokenCache = { eu: null, com: null };
 
 async function getPartnerToken(store) {
   const cfg = STORES[store];
   if (!cfg) throw new Error("Unknown store: " + store);
-
-  const cached = tokenCache[store];
-  if (cached && Date.now() < cached.expires) {
-    return cached.token;
+  if (!cfg.refreshToken()) {
+    throw new Error(`Partner Store (${store}) not configured — missing refresh token`);
   }
-
-  try {
-    const res = await axios.post(`${cfg.base}/oauth/token`, {
-      username: cfg.email(),
-      password: cfg.password(),
-      grant_type: "password",
-    });
-    tokenCache[store] = {
-      token: res.data.access_token,
-      expires: Date.now() + 3500 * 1000,
-    };
-    return tokenCache[store].token;
-  } catch (err) {
-    console.error(`Partner Store (${store}) auth failed:`, err.message);
-    throw err;
-  }
+  return getZohoToken(
+    cfg.key,
+    cfg.accountsUrl(),
+    cfg.clientId(),
+    cfg.clientSecret(),
+    cfg.refreshToken()
+  );
 }
 
 async function fetchSubscriptions(store) {
   try {
-    const token = await getPartnerToken(store);
     const cfg = STORES[store];
-    const res = await axios.get(`${cfg.base}/subscriptions`, {
+    const token = await getPartnerToken(store);
+    const res = await axios.get(`${cfg.base()}/api/v1/partner/subscriptions`, {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
       params: { per_page: 200 },
     });
     return res.data.subscriptions || res.data.data || [];
   } catch (err) {
-    console.error(`Partner Store (${store}) fetchSubscriptions failed:`, err.message);
+    const msg = err.response
+      ? `HTTP ${err.response.status} ${JSON.stringify(err.response.data).slice(0, 160)}`
+      : err.message;
+    console.error(`[partner:${store}] fetchSubscriptions failed: ${msg}`);
     return [];
   }
 }
@@ -71,12 +70,10 @@ async function fetchAllSubscriptions() {
 }
 
 async function healthCheck() {
+  // Consider Partner Store healthy if at least one side authenticates.
   try {
-    await Promise.race([
-      Promise.any([getPartnerToken("eu"), getPartnerToken("com")]),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)),
-    ]);
-    return true;
+    const results = await Promise.allSettled([getPartnerToken("eu"), getPartnerToken("com")]);
+    return results.some((r) => r.status === "fulfilled");
   } catch {
     return false;
   }
