@@ -1,6 +1,7 @@
 const books = require("../services/zoho-books");
 const moloni = require("../services/moloni");
 const partner = require("../services/zoho-partner");
+const forex = require("../services/forex");
 const config = require("../config");
 const CLIENT_MAP = require("../client-map");
 
@@ -197,52 +198,76 @@ async function buildLicencePipeline(year, booksSoNumbers) {
     const horizon = new Date();
     horizon.setDate(horizon.getDate() + 365);
 
+    let included = 0;
     for (const sub of subs) {
+      // Only include active subscriptions (Zoho status "live")
+      const st = (sub.status || "").toLowerCase();
+      if (!["live", "active"].includes(st)) continue;
+
+      // Partner Store uses next_recurring_date as the renewal date field
       const renewalRaw =
+        sub.next_recurring_date ||
         sub.next_billing_date ||
         sub.renewal_date ||
         sub.expires_on ||
         sub.expiry_date ||
         sub.end_date;
       if (!renewalRaw) continue;
-      const d = new Date(renewalRaw);
+      // Zoho dates are YYYY-MM-DD — parse as UTC midnight to avoid timezone shift
+      const d = renewalRaw.includes("T") ? new Date(renewalRaw) : new Date(renewalRaw + "T00:00:00Z");
       if (isNaN(d) || d < now || d > horizon) continue;
 
-      const resellerPrice = Number(
-        sub.total ||
+      const origCurrency = (sub.currency || "EUR").toUpperCase();
+      const origAmount = Number(
+        sub.next_recurring_amount ||
+          sub.total ||
           sub.amount ||
           sub.net_amount ||
           sub.reseller_price ||
           sub.price ||
           0
       );
-      const clientPrice = Math.round(resellerPrice * config.zoho_licence_margin * 100) / 100;
+      // Convert reseller price to EUR at today's live rate
+      const resellerPriceEUR = Math.round((await forex.toEUR(origAmount, origCurrency)) * 100) / 100;
+      const clientPrice = Math.round(resellerPriceEUR * config.zoho_licence_margin * 100) / 100;
       const mk = MONTHS[d.getMonth()];
+      // Partner Store uses customer_company_name
       const clientName =
+        sub.customer_company_name ||
         sub.customer_name ||
         sub.contact_name ||
         sub.company_name ||
+        sub.email_id ||
         sub.email ||
         "—";
       const service =
-        sub.product_name || sub.plan_name || sub.plan_code || sub.service || "—";
+        sub.service_name || sub.product_name || sub.plan_name || sub.plan_code || sub.service || "—";
 
       const soMatch = booksSoNumbers && booksSoNumbers.has(clientName);
+
+      // e.g. "2026-04" for April 2026 — used to group on the client
+      const month_key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 
       pipeline.annual_licences.push({
         store: sub._store,
         client: clientName,
         service,
         month: mk,
+        month_key,
+        year: d.getUTCFullYear(),
         amount: clientPrice,
-        reseller_price: resellerPrice,
+        reseller_price: resellerPriceEUR,
+        orig_amount: origAmount,
+        orig_currency: origCurrency,
         renewal_date: renewalRaw,
         already_in_books: !!soMatch,
-        status: "pending",
+        status: sub.status || "live",
       });
 
       pipeline.by_month[mk] = (pipeline.by_month[mk] || 0) + clientPrice;
+      included++;
     }
+    console.log(`[partner] ${subs.length} subs fetched, ${included} within 365-day horizon`);
   } catch (err) {
     console.error("Partner subs error:", err.message);
   }

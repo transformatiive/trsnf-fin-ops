@@ -69,12 +69,11 @@ async function fetchSubscriptions(store) {
       // Log sample renewal fields from first sub
       const sample = subs[0];
       const renewalFields = [
-        "next_billing_date", "renewal_date", "expires_on",
-        "expiry_date", "end_date", "next_renewal_date",
+        "next_recurring_date", "next_billing_date", "renewal_date",
+        "expires_on", "expiry_date", "end_date",
       ];
       const found = renewalFields.filter((f) => sample[f]);
-      console.log(`[partner:${store}] sample sub keys: [${Object.keys(sample).join(", ")}]`);
-      console.log(`[partner:${store}] renewal fields found: [${found.map((f) => `${f}=${sample[f]}`).join(", ")}]`);
+      console.log(`[partner:${store}] renewal date fields present: [${found.map((f) => `${f}=${sample[f]}`).join(", ") || "none"}]`);
     }
     return subs;
   } catch (err) {
