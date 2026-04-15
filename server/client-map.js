@@ -1,0 +1,23 @@
+// Zoho Books customer_name -> Moloni customer
+module.exports = {
+  "Instituto Unicenter": { moloni_id: 119702938, name: "Advance Station - Individual Development, Lda" },
+  "LOBA": { moloni_id: 57195002, name: "Globaz S A" },
+  "Hi Fly": { moloni_id: 108068856, name: "Hi Fly Serviços Partilhados" },
+  "Leasys Mobility Portugal": { moloni_id: 92198146, name: "Leasys Mobility Portugal S A" },
+  "SIE": { moloni_id: 141263786, name: "Sie Soc Internacional Embalagens Sa" },
+  "Alfa Seguros - Alfaseg, Lda": { moloni_id: 121345727, name: "Alfaseg - Gestão de Seguros Lda" },
+  "Pinto Duarte": { moloni_id: 123025974, name: "Memostars - Consultoria Lda" },
+  "CJ Seguros": { moloni_id: 132178109, name: "Libelinha D Exito - Mediação de Seguros Lda" },
+  "Simplybus": { moloni_id: 144821304, name: "Edgar Cova - Transporte de Passageiros, Lda" },
+  "Intellectus": { moloni_id: 136835517, name: "Intellectus - Centro de Formação Técnica, Unipessoal Lda" },
+  "Estrategor, Lda": { moloni_id: 145476714, name: "Estrategor Consultores de Gestão Lda" },
+  "Yourbranding": { moloni_id: 121760507, name: "Your Orange Branding Lda" },
+  "Nova Mentis": { moloni_id: 117316919, name: "Nova Mentis Ltd." },
+  "Zoho Corporation": { moloni_id: 89533913, name: "ZOHO Corporation" },
+  "Automated Retail Technologies": { moloni_id: 64827895, name: "Automated Retail Technologies LLC" },
+  "Stelic, LLC": { moloni_id: 147853905, name: "Stelic, LLC" },
+  "TO BE.": { moloni_id: 67086650, name: "Aging Well Lda" },
+  "APeople, Empresa de Trabalho Temporario Lda": { moloni_id: 125737943, name: "App Empresa de Trabalho Temporario Lda" },
+  "FROTCOM LUSITANA": { moloni_id: 111979338, name: "Frotcom Lusitana, Lda" },
+  "Buenavista Equity Partners Portugal, SCR, S.A.": { moloni_id: 138949258, name: "Buenavista Equity Partners Portugal, SCR, S.A." },
+};
