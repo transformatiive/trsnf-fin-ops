@@ -50,3 +50,4 @@ outputType = "webview"
 
 [agent]
 expertMode = true
+stack = "BEST_EFFORT_FALLBACK"
