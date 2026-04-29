@@ -1,6 +1,13 @@
 /* ===== Global Resets ===== */
 * { box-sizing: border-box; }
 
+html, body {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  width: 100%;
+  position: relative;
+}
+
 /* ===== Mobile / Touch ===== */
 /* Smooth scrolling for horizontal tables on touch */
 .table-scroll {
