@@ -434,6 +434,7 @@ function PLRow({ label, values, total, bold, italic, color, indent = 0, clickabl
       }}
     >
       <td
+        className="col-label"
         style={{
           padding: "7px 10px",
           paddingLeft: 10 + indent,
@@ -452,6 +453,7 @@ function PLRow({ label, values, total, bold, italic, color, indent = 0, clickabl
       {values.map((v, i) => (
         <td
           key={i}
+          className="col-month"
           style={{
             textAlign: "right",
             padding: "7px 6px",
@@ -475,10 +477,11 @@ function PLTable({ rows, totals, data }) {
 
   return (
     <div className="table-scroll" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 16 }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+      <table className="dash-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${C.border}` }}>
             <th
+              className="col-label"
               style={{
                 textAlign: "left",
                 padding: "8px 10px",
@@ -497,7 +500,7 @@ function PLTable({ rows, totals, data }) {
               Linha
             </th>
             {MONTHS_PT.map((m) => (
-              <th key={m} style={{ textAlign: "right", padding: "8px 6px", fontSize: 11, fontWeight: 600, color: C.muted, minWidth: 64 }}>
+              <th key={m} className="col-month" style={{ textAlign: "right", padding: "8px 6px", fontSize: 11, fontWeight: 600, color: C.muted, minWidth: 64 }}>
                 {m}
               </th>
             ))}

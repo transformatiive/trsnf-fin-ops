@@ -16,6 +16,7 @@ function MonthHeader() {
     <thead>
       <tr style={{ borderBottom: `1px solid ${C.border}` }}>
         <th
+          className="col-label"
           style={{
             textAlign: "left",
             padding: "8px 10px",
@@ -36,6 +37,7 @@ function MonthHeader() {
         {MONTHS_PT.map((m) => (
           <th
             key={m}
+            className="col-month"
             style={{
               textAlign: "right",
               padding: "8px 6px",
@@ -76,6 +78,7 @@ function SummaryRow({ label, byMonth, color, open, onToggle, clickable = true })
       onClick={clickable ? onToggle : undefined}
     >
       <td
+        className="col-label"
         style={{
           padding: "8px 10px",
           fontWeight: 600,
@@ -95,6 +98,7 @@ function SummaryRow({ label, byMonth, color, open, onToggle, clickable = true })
         return (
           <td
             key={m}
+            className="col-month"
             style={{
               textAlign: "right",
               padding: "6px 6px",
@@ -130,6 +134,7 @@ function ItemRow({ label, byMonthAmounts, statusFn }) {
   return (
     <tr style={{ borderBottom: `1px solid ${C.border}` }}>
       <td
+        className="col-label"
         style={{
           padding: "6px 10px 6px 28px",
           fontSize: 12,
@@ -208,6 +213,7 @@ function GrandTotalRow({ data }) {
   return (
     <tr style={{ background: "#f0ede6", borderTop: `2px solid ${C.borderStrong}`, borderBottom: `2px solid ${C.borderStrong}` }}>
       <td
+        className="col-label"
         style={{
           padding: "10px",
           fontWeight: 700,
@@ -222,6 +228,7 @@ function GrandTotalRow({ data }) {
       {MONTHS.map((m) => (
         <td
           key={m}
+          className="col-month"
           style={{
             textAlign: "right",
             padding: "10px 6px",
@@ -271,6 +278,7 @@ function LicencesSection({ data }) {
             return (
               <tr key={`mc${i}`} style={{ borderBottom: `1px solid ${C.border}` }}>
                 <td
+                  className="col-label"
                   style={{
                     padding: "6px 10px 6px 28px",
                     fontSize: 12,
@@ -303,6 +311,7 @@ function LicencesSection({ data }) {
             return (
               <tr key={`al${i}`} style={{ borderBottom: `1px solid ${C.border}` }}>
                 <td
+                  className="col-label"
                   style={{
                     padding: "6px 10px 6px 28px",
                     fontSize: 12,
@@ -336,7 +345,7 @@ function LicencesSection({ data }) {
 export default function ActionsTab({ data }) {
   return (
     <div className="table-scroll" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <table className="dash-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <MonthHeader />
         <tbody>
           <Section

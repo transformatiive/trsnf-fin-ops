@@ -125,7 +125,7 @@ export default function LicencesTab({ data }) {
       <div style={{ fontSize: 12, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>
         Clientes Mensais ({monthly.length})
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(320px, 100%), 1fr))", gap: 12 }}>
         {monthly.map((c) => (
           <MonthlyCard key={c.key} c={c} />
         ))}
@@ -148,7 +148,7 @@ export default function LicencesTab({ data }) {
           Sem renovações anuais nos próximos 365 dias (ou Partner Store indisponível).
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(280px, 100%), 1fr))", gap: 12 }}>
           {annual.map((l, i) => (
             <AnnualCard key={i} l={l} />
           ))}

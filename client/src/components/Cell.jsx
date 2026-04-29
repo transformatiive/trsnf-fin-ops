@@ -7,6 +7,7 @@ export default function Cell({ status = null, amount = 0, compact = false }) {
   const show = amount || status;
   return (
     <td
+      className="col-month"
       style={{
         textAlign: "right",
         padding: compact ? "4px 6px" : "6px 8px",
