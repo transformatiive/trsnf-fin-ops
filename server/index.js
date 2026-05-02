@@ -8,6 +8,7 @@ const { loadCredentials } = require("./services/vault");
 const { buildDashboard, invalidateCache } = require("./api/dashboard");
 const { streamAnalysis } = require("./api/analysis");
 const { healthCheck } = require("./api/health");
+const { getBudget, saveBudget } = require("./api/budget");
 
 const PORT = process.env.PORT || 3000;
 
@@ -96,6 +97,9 @@ app.get("/api/dashboard", requireAuth, async (req, res) => {
 });
 
 app.get("/api/analysis", requireAuth, streamAnalysis);
+
+app.get("/api/budget", requireAuth, getBudget);
+app.post("/api/budget", requireAuth, saveBudget);
 
 // Force re-fetch credentials from vault (useful if a secret was rotated)
 app.post("/api/vault/reload", requireAuth, async (req, res) => {

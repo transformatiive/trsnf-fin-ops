@@ -15,7 +15,8 @@
     "axios": "^1.15.0",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
-    "express": "^4.22.1"
+    "express": "^4.22.1",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",

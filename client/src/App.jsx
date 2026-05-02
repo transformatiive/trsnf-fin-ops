@@ -185,7 +185,7 @@ export default function App() {
   const [scenario, setScenario] = useState("base");
   const [budgetEditorOpen, setBudgetEditorOpen] = useState(false);
 
-  const { budget, setBudget } = useBudget();
+  const { budget, setBudget } = useBudget(authedFetch);
   const { data, loading, error, lastRefresh, reload } = useDashboard(authedFetch, !!token);
   const analysis = useAnalysis(token, tab === "pl" ? "pl" : "actions", !!token && !!data && tab !== "licences");
 
