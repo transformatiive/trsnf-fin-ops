@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { C, MONTHS, MONTHS_PT } from "../utils/constants";
 import { fmt, fmtK } from "../utils/fmt";
+import { getOccurrenceMonths, annualOccurrences } from "../hooks/useBudget";
 
 function revenueByMonth(data) {
   const r = {};
@@ -32,7 +33,13 @@ function cogsForMonth(m, data, margin) {
 }
 
 function fixedCostsForMonth(m, budget) {
-  const base = Object.values(budget.fixed_costs).reduce((a, b) => a + b, 0);
+  const costs = Array.isArray(budget.fixed_costs)
+    ? budget.fixed_costs
+    : Object.entries(budget.fixed_costs).map(([name, amount]) => ({ name, amount, frequency: "monthly", start_month: "Jan" }));
+  const base = costs.reduce((a, c) => {
+    const months = getOccurrenceMonths(c.frequency || "monthly", c.start_month || "Jan");
+    return a + (months.includes(m) ? c.amount : 0);
+  }, 0);
   const salary = m === "Jan" ? 0 : budget.salary;
   return base + salary;
 }
@@ -385,13 +392,23 @@ function PLTable({ rows, totals, data, budget }) {
             values={rows.map((r) => <span style={{ color: C.red }}>-{fmtK(r.fixed)}</span>)}
             total={<span style={{ color: C.red, fontWeight: 700 }}>-{fmt(totals.fixed)}</span>}
           />
-          {openFixed &&
-            Object.entries(budget.fixed_costs).map(([k, v]) => (
-              <PLRow key={k} label={k} indent={16} color={C.muted}
-                values={rows.map(() => "-" + fmtK(v))}
-                total={"-" + fmt(v * 12)}
-              />
-            ))}
+          {openFixed && (() => {
+            const costs = Array.isArray(budget.fixed_costs)
+              ? budget.fixed_costs
+              : Object.entries(budget.fixed_costs).map(([name, amount]) => ({ name, amount, frequency: "monthly", start_month: "Jan" }));
+            const freqLabel = { monthly: "M", quarterly: "T", semi_annual: "S", annual: "A" };
+            return costs.map((c, i) => {
+              const occMonths = getOccurrenceMonths(c.frequency || "monthly", c.start_month || "Jan");
+              const occ = annualOccurrences(c.frequency || "monthly");
+              return (
+                <PLRow key={i} indent={16} color={C.muted}
+                  label={<span>{c.name} <span style={{ fontSize: 9, padding: "1px 4px", borderRadius: 6, background: C.border, color: C.muted, marginLeft: 3 }}>{freqLabel[c.frequency] || "M"}</span></span>}
+                  values={rows.map((r) => occMonths.includes(r.month) ? "-" + fmtK(c.amount) : "—")}
+                  total={"-" + fmt(c.amount * occ)}
+                />
+              );
+            });
+          })()}
           {openFixed && (
             <PLRow
               label="Salário" indent={16} color={C.muted}

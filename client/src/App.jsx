@@ -28,8 +28,11 @@ function computeNetResult(data, budget) {
       (data.licence_pipeline?.by_month?.[m] || 0),
     0
   );
-  const fixedBase = Object.values(budget.fixed_costs).reduce((a, b) => a + b, 0);
-  const fixed = fixedBase * 12 + budget.salary * 11;
+  const OCC = { monthly: 12, quarterly: 4, semi_annual: 2, annual: 1 };
+  const fixedCosts = Array.isArray(budget.fixed_costs)
+    ? budget.fixed_costs
+    : Object.entries(budget.fixed_costs).map(([name, amount]) => ({ name, amount, frequency: "monthly" }));
+  const fixed = fixedCosts.reduce((a, c) => a + c.amount * (OCC[c.frequency] ?? 12), 0) + budget.salary * 11;
   let cogs = 0;
   for (const c of data.licence_pipeline?.monthly_clients || []) {
     for (const m of MONTHS) if (c.status[m]) cogs += c.monthly / budget.margin;
