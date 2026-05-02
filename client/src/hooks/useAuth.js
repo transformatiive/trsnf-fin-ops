@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
-// In-memory token only (spec says no localStorage). But we need session
-// continuity across reloads for the password gate to be usable — sessionStorage
-// is tab-scoped and doesn't persist across tabs/reloads of the browser close,
-// which is acceptable.
+// Persisted in localStorage so the session survives browser closes.
+// The token has a 12h TTL enforced server-side, so this is safe.
 const STORAGE_KEY = "trnsf_session_token";
 
 function readToken() {
   try {
-    return sessionStorage.getItem(STORAGE_KEY);
+    return localStorage.getItem(STORAGE_KEY);
   } catch {
     return null;
   }
@@ -16,8 +14,8 @@ function readToken() {
 
 function writeToken(t) {
   try {
-    if (t) sessionStorage.setItem(STORAGE_KEY, t);
-    else sessionStorage.removeItem(STORAGE_KEY);
+    if (t) localStorage.setItem(STORAGE_KEY, t);
+    else localStorage.removeItem(STORAGE_KEY);
   } catch {}
 }
 

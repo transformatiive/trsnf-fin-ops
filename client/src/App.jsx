@@ -8,18 +8,16 @@ import ActionsTab from "./components/ActionsTab";
 import PLTab from "./components/PLTab";
 import LicencesTab from "./components/LicencesTab";
 import AnalysisPanel from "./components/AnalysisPanel";
+import BudgetEditor from "./components/BudgetEditor";
 import { useAuth } from "./hooks/useAuth";
 import { useDashboard } from "./hooks/useDashboard";
 import { useAnalysis } from "./hooks/useAnalysis";
+import { useBudget } from "./hooks/useBudget";
 import { C } from "./utils/constants";
 import { fmt } from "./utils/fmt";
 
-const ANNUAL_GOAL = 250000;
-const IRC_RATE = 0.21;
-const MARGIN = 1.18;
-
-function computeNetResult(data) {
-  if (!data) return 0;
+function computeNetResult(data, budget) {
+  if (!data || !budget) return 0;
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const revenue = MONTHS.reduce(
     (a, m) =>
@@ -30,21 +28,20 @@ function computeNetResult(data) {
       (data.licence_pipeline?.by_month?.[m] || 0),
     0
   );
-  const FIXED_BASE = 1957;
-  const SALARY = 1114;
-  const fixed = FIXED_BASE * 12 + SALARY * 11;
+  const fixedBase = Object.values(budget.fixed_costs).reduce((a, b) => a + b, 0);
+  const fixed = fixedBase * 12 + budget.salary * 11;
   let cogs = 0;
   for (const c of data.licence_pipeline?.monthly_clients || []) {
-    for (const m of MONTHS) if (c.status[m]) cogs += c.monthly / MARGIN;
+    for (const m of MONTHS) if (c.status[m]) cogs += c.monthly / budget.margin;
   }
-  for (const l of data.licence_pipeline?.annual_licences || []) cogs += l.amount / MARGIN;
-  const oneOff = 5300 + 8000;
+  for (const l of data.licence_pipeline?.annual_licences || []) cogs += l.amount / budget.margin;
+  const oneOff = MONTHS.reduce((a, m) => a + (budget.one_off[m] || []).reduce((s, x) => s + x.amount, 0), 0);
   const net = revenue - fixed - cogs - oneOff;
   const preTax = Math.max(0, net);
-  return Math.round(net - preTax * IRC_RATE);
+  return Math.round(net - preTax * budget.irc_rate);
 }
 
-function Header({ data, lastRefresh, loading, onReload, onLogout }) {
+function Header({ data, lastRefresh, loading, onReload, onLogout, annualGoal }) {
   return (
     <div
       className="header-row"
@@ -83,7 +80,7 @@ function Header({ data, lastRefresh, loading, onReload, onLogout }) {
           Financial Dashboard
         </h1>
         <div style={{ fontSize: 12, color: C.faint }}>
-          {data?.fiscal_year || 2026} · Meta anual {fmt(ANNUAL_GOAL)}
+          {data?.fiscal_year || 2026} · Meta anual {fmt(annualGoal)}
           {lastRefresh && (
             <> · Atualizado {new Date(lastRefresh).toLocaleTimeString("pt-PT")}</>
           )}
@@ -186,24 +183,17 @@ export default function App() {
   const { token, checking, error: authError, login, logout, authedFetch } = useAuth();
   const [tab, setTab] = useState("actions");
   const [scenario, setScenario] = useState("base");
+  const [budgetEditorOpen, setBudgetEditorOpen] = useState(false);
 
+  const { budget, setBudget } = useBudget();
   const { data, loading, error, lastRefresh, reload } = useDashboard(authedFetch, !!token);
   const analysis = useAnalysis(token, tab === "pl" ? "pl" : "actions", !!token && !!data && tab !== "licences");
 
-  const netResult = useMemo(() => computeNetResult(data), [data]);
+  const netResult = useMemo(() => computeNetResult(data, budget), [data, budget]);
 
   if (checking) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: C.faint,
-          fontSize: 20,
-        }}
-      >
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: C.faint, fontSize: 20 }}>
         …
       </div>
     );
@@ -226,6 +216,7 @@ export default function App() {
           loading={loading}
           onReload={reload}
           onLogout={logout}
+          annualGoal={budget.annual_goal}
         />
 
         {data && (
@@ -255,7 +246,13 @@ export default function App() {
             )}
             {tab === "pl" && (
               <>
-                <PLTab data={data} scenario={scenario} setScenario={setScenario} />
+                <PLTab
+                  data={data}
+                  scenario={scenario}
+                  setScenario={setScenario}
+                  budget={budget}
+                  onEditBudget={() => setBudgetEditorOpen(true)}
+                />
                 <AnalysisPanel
                   tab="pl"
                   text={analysis.text}
@@ -269,6 +266,14 @@ export default function App() {
           </>
         )}
       </div>
+
+      {budgetEditorOpen && (
+        <BudgetEditor
+          budget={budget}
+          onSave={setBudget}
+          onClose={() => setBudgetEditorOpen(false)}
+        />
+      )}
     </div>
   );
 }

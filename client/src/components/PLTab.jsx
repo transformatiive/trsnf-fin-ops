@@ -2,33 +2,6 @@ import React, { useMemo, useRef, useState } from "react";
 import { C, MONTHS, MONTHS_PT } from "../utils/constants";
 import { fmt, fmtK } from "../utils/fmt";
 
-const FIXED_COSTS = {
-  "Leasys Renting": 616,
-  Credibom: 341,
-  "Via Verde": 79,
-  Tesla: 10,
-  NBiz: 369,
-  Comissões: 65,
-  Generali: 130,
-  "AI/LLM": 128,
-  "Dev Infra": 110,
-  SaaS: 101,
-  Moloni: 62,
-  Subscrições: 45,
-  Iberdrola: 15,
-};
-const SALARY = 1114;
-const FIXED_BASE = Object.values(FIXED_COSTS).reduce((a, b) => a + b, 0); // 1957
-const MONTHLY_GOAL = 20833;
-const ANNUAL_GOAL = 250000;
-const IRC_RATE = 0.21;
-const MARGIN = 1.18;
-
-const ONE_OFF = {
-  May: [{ label: "IRC — Pagamento Por Conta", amount: 5300 }],
-  Jun: [{ label: "Financiamento auto (entrada)", amount: 8000 }],
-};
-
 function revenueByMonth(data) {
   const r = {};
   for (const m of MONTHS) {
@@ -47,31 +20,30 @@ function actualsPaidByMonth(data) {
   return r;
 }
 
-function cogsForMonth(m, data) {
+function cogsForMonth(m, data, margin) {
   let cogs = 0;
   for (const c of data.licence_pipeline?.monthly_clients || []) {
-    if (c.status[m]) cogs += c.monthly / MARGIN;
+    if (c.status[m]) cogs += c.monthly / margin;
   }
   for (const l of data.licence_pipeline?.annual_licences || []) {
-    if (l.month === m) cogs += l.amount / MARGIN;
+    if (l.month === m) cogs += l.amount / margin;
   }
   return cogs;
 }
 
-function fixedCostsForMonth(m) {
-  const base = FIXED_BASE;
-  const salary = m === "Jan" ? 0 : SALARY;
+function fixedCostsForMonth(m, budget) {
+  const base = Object.values(budget.fixed_costs).reduce((a, b) => a + b, 0);
+  const salary = m === "Jan" ? 0 : budget.salary;
   return base + salary;
 }
 
-function oneOffForMonth(m) {
-  return (ONE_OFF[m] || []).reduce((a, x) => a + x.amount, 0);
+function oneOffForMonth(m, budget) {
+  return (budget.one_off[m] || []).reduce((a, x) => a + x.amount, 0);
 }
 
-// IVA: quarterly estimated on net (revenue - cogs) at 18%
-function ivaPayments(revenue, data) {
+function ivaPayments(revenue, data, margin) {
   const perMonth = MONTHS.map((m) => {
-    const net = (revenue[m] || 0) - cogsForMonth(m, data);
+    const net = (revenue[m] || 0) - cogsForMonth(m, data, margin);
     return Math.max(0, net) * 0.18;
   });
   const pay = { May: 0, Aug: 0, Nov: 0, Feb: 0 };
@@ -82,37 +54,36 @@ function ivaPayments(revenue, data) {
   return pay;
 }
 
-function computePL(data, scenario) {
+function computePL(data, scenario, budget) {
   const multiplier = scenario === "conservative" ? 0.7 : scenario === "optimistic" ? 1.3 : 1.0;
-  const todayIdx = new Date().getMonth(); // 0-based
+  const todayIdx = new Date().getMonth();
   const revenue = revenueByMonth(data);
   const actuals = actualsPaidByMonth(data);
 
-  // Apply multiplier only to future months (May+ per spec but we use today+)
   const revenueAdjusted = {};
   for (let i = 0; i < 12; i++) {
     const m = MONTHS[i];
     revenueAdjusted[m] = i <= todayIdx ? actuals[m] : (revenue[m] || 0) * multiplier;
   }
 
-  const iva = ivaPayments(revenueAdjusted, data);
+  const iva = ivaPayments(revenueAdjusted, data, budget.margin);
 
   const rows = MONTHS.map((m, i) => {
     const rev = revenueAdjusted[m];
-    const fixed = fixedCostsForMonth(m);
-    const cogs = cogsForMonth(m, data);
-    const oneOff = oneOffForMonth(m);
+    const fixed = fixedCostsForMonth(m, budget);
+    const cogs = cogsForMonth(m, data, budget.margin);
+    const oneOff = oneOffForMonth(m, budget);
     const ivaPay = iva[m] || 0;
     const preTax = rev - fixed - cogs - oneOff - ivaPay;
-    const irc = preTax > 0 ? preTax * IRC_RATE : 0;
+    const irc = preTax > 0 ? preTax * budget.irc_rate : 0;
     const net = preTax - irc;
     return {
       month: m,
       monthLabel: MONTHS_PT[i],
       isPast: i <= todayIdx,
-      plan: MONTHLY_GOAL,
+      plan: budget.monthly_goal,
       revenue: rev,
-      variance: rev - MONTHLY_GOAL,
+      variance: rev - budget.monthly_goal,
       fixed,
       cogs,
       oneOff,
@@ -168,13 +139,13 @@ function ScenarioSelector({ scenario, setScenario }) {
   );
 }
 
-function ProgressBar({ forecast }) {
-  const pct = Math.min(100, Math.round((forecast / ANNUAL_GOAL) * 100));
+function ProgressBar({ forecast, annualGoal }) {
+  const pct = Math.min(100, Math.round((forecast / annualGoal) * 100));
   const good = pct >= 80;
   return (
     <div style={{ marginTop: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 4 }}>
-        <span>Progresso para €250.000</span>
+        <span>Progresso para {fmt(annualGoal)}</span>
         <span>{pct}% · {fmt(forecast)}</span>
       </div>
       <div style={{ background: C.border, height: 8, borderRadius: 4, overflow: "hidden" }}>
@@ -184,7 +155,7 @@ function ProgressBar({ forecast }) {
   );
 }
 
-function Tooltip({ row, anchorRef }) {
+function Tooltip({ row, anchorRef, monthlyGoal }) {
   if (!row || !anchorRef.current) return null;
   const costs = row.fixed + row.cogs + row.oneOff + row.iva;
   const netPositive = row.net >= 0;
@@ -226,37 +197,26 @@ function Tooltip({ row, anchorRef }) {
           <span style={{ fontWeight: 600 }}>-{fmt(costs)}</span>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 24 }}>
-          <span style={{ opacity: 0.8 }}>vs Meta {fmt(MONTHLY_GOAL)}</span>
-          <span style={{ fontWeight: 600, color: row.revenue >= MONTHLY_GOAL ? "#4ade80" : "#f87171" }}>
-            {row.revenue >= MONTHLY_GOAL ? "+" : ""}{fmt(row.revenue - MONTHLY_GOAL)}
+          <span style={{ opacity: 0.8 }}>vs Meta {fmt(monthlyGoal)}</span>
+          <span style={{ fontWeight: 600, color: row.revenue >= monthlyGoal ? "#4ade80" : "#f87171" }}>
+            {row.revenue >= monthlyGoal ? "+" : ""}{fmt(row.revenue - monthlyGoal)}
           </span>
         </div>
         <div
           style={{
             borderTop: "1px solid rgba(255,255,255,0.15)",
-            marginTop: 4,
-            paddingTop: 4,
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 24,
+            marginTop: 4, paddingTop: 4,
+            display: "flex", justifyContent: "space-between", gap: 24,
           }}
         >
           <span style={{ fontWeight: 600 }}>Líquido</span>
-          <span style={{ fontWeight: 700, color: netPositive ? "#4ade80" : "#f87171" }}>
-            {fmt(row.net)}
-          </span>
+          <span style={{ fontWeight: 700, color: netPositive ? "#4ade80" : "#f87171" }}>{fmt(row.net)}</span>
         </div>
       </div>
-      {/* Arrow */}
       <div
         style={{
-          position: "absolute",
-          bottom: -5,
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: 10,
-          height: 10,
-          background: "#1a1a1a",
+          position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%)",
+          width: 10, height: 10, background: "#1a1a1a",
           clipPath: "polygon(0 0, 100% 0, 50% 100%)",
         }}
       />
@@ -264,8 +224,8 @@ function Tooltip({ row, anchorRef }) {
   );
 }
 
-function BarChart({ rows }) {
-  const maxRev = Math.max(...rows.map((r) => r.revenue), MONTHLY_GOAL);
+function BarChart({ rows, monthlyGoal }) {
+  const maxRev = Math.max(...rows.map((r) => r.revenue), monthlyGoal);
   const maxCost = Math.max(...rows.map((r) => r.fixed + r.cogs + r.oneOff + r.iva));
   const max = Math.max(maxRev, maxCost) * 1.1;
   const H = 170;
@@ -274,7 +234,6 @@ function BarChart({ rows }) {
 
   return (
     <div style={{ marginTop: 14 }}>
-      {/* Legend */}
       <div style={{ display: "flex", gap: 16, marginBottom: 10, fontSize: 11, color: C.muted, flexWrap: "wrap" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ width: 10, height: 10, borderRadius: 2, background: C.green, display: "inline-block" }} />
@@ -294,7 +253,6 @@ function BarChart({ rows }) {
         </span>
       </div>
 
-      {/* Chart */}
       <div style={{ position: "relative", display: "flex", alignItems: "flex-end", gap: 5, height: H, padding: "6px 0" }}>
         {rows.map((r) => {
           const revH = Math.max(2, (r.revenue / max) * H);
@@ -307,90 +265,25 @@ function BarChart({ rows }) {
               ref={isHovered ? anchorRef : null}
               onMouseEnter={() => setHover(r)}
               onMouseLeave={() => setHover(null)}
-              style={{
-                flex: 1,
-                display: "flex",
-                gap: 2,
-                alignItems: "flex-end",
-                height: H,
-                position: "relative",
-                cursor: "pointer",
-              }}
+              style={{ flex: 1, display: "flex", gap: 2, alignItems: "flex-end", height: H, position: "relative", cursor: "pointer" }}
             >
-              {isHovered && <Tooltip row={r} anchorRef={anchorRef} />}
-
-              {/* Revenue bar */}
-              <div
-                style={{
-                  flex: 1,
-                  height: revH,
-                  background: r.isPast ? C.green : C.greenLight,
-                  border: `1px solid ${C.greenBorder}`,
-                  borderRadius: "4px 4px 0 0",
-                  opacity: isHovered ? 1 : 0.85,
-                  transition: "opacity 0.1s, height 0.2s",
-                }}
-              />
-
-              {/* Cost bar */}
-              <div
-                style={{
-                  flex: 1,
-                  height: costH,
-                  background: isHovered ? "#fca5a5" : "#fecaca",
-                  border: "1px solid #fca5a5",
-                  borderRadius: "4px 4px 0 0",
-                  opacity: isHovered ? 1 : 0.8,
-                  transition: "opacity 0.1s",
-                }}
-              />
+              {isHovered && <Tooltip row={r} anchorRef={anchorRef} monthlyGoal={monthlyGoal} />}
+              <div style={{ flex: 1, height: revH, background: r.isPast ? C.green : C.greenLight, border: `1px solid ${C.greenBorder}`, borderRadius: "4px 4px 0 0", opacity: isHovered ? 1 : 0.85, transition: "opacity 0.1s, height 0.2s" }} />
+              <div style={{ flex: 1, height: costH, background: isHovered ? "#fca5a5" : "#fecaca", border: "1px solid #fca5a5", borderRadius: "4px 4px 0 0", opacity: isHovered ? 1 : 0.8, transition: "opacity 0.1s" }} />
             </div>
           );
         })}
 
-        {/* Goal line */}
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: `${(MONTHLY_GOAL / max) * H}px`,
-            borderTop: `1.5px dashed ${C.muted}`,
-            pointerEvents: "none",
-          }}
-        >
-          <span
-            style={{
-              position: "absolute",
-              right: 0,
-              top: -16,
-              fontSize: 9,
-              color: C.muted,
-              fontWeight: 600,
-              background: C.surface,
-              padding: "1px 4px",
-              borderRadius: 3,
-            }}
-          >
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: `${(monthlyGoal / max) * H}px`, borderTop: `1.5px dashed ${C.muted}`, pointerEvents: "none" }}>
+          <span style={{ position: "absolute", right: 0, top: -16, fontSize: 9, color: C.muted, fontWeight: 600, background: C.surface, padding: "1px 4px", borderRadius: 3 }}>
             META
           </span>
         </div>
       </div>
 
-      {/* Month labels */}
       <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
         {rows.map((r) => (
-          <div
-            key={r.month}
-            style={{
-              flex: 1,
-              textAlign: "center",
-              fontSize: 10,
-              fontWeight: hover?.month === r.month ? 700 : 400,
-              color: hover?.month === r.month ? C.text : C.faint,
-              transition: "color 0.1s, font-weight 0.1s",
-            }}
-          >
+          <div key={r.month} style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: hover?.month === r.month ? 700 : 400, color: hover?.month === r.month ? C.text : C.faint, transition: "color 0.1s, font-weight 0.1s" }}>
             {r.monthLabel}
           </div>
         ))}
@@ -408,15 +301,11 @@ function VariancePill({ value, faded }) {
         background: positive ? C.greenLight : C.redLight,
         color: positive ? C.greenText : C.red,
         border: `1px solid ${positive ? C.greenBorder : "#fecaca"}`,
-        borderRadius: 10,
-        fontSize: 10,
-        fontWeight: 600,
-        opacity: faded ? 0.5 : 1,
-        fontVariantNumeric: "tabular-nums",
+        borderRadius: 10, fontSize: 10, fontWeight: 600,
+        opacity: faded ? 0.5 : 1, fontVariantNumeric: "tabular-nums",
       }}
     >
-      {positive ? "+" : ""}
-      {fmtK(value)}
+      {positive ? "+" : ""}{fmtK(value)}
     </span>
   );
 }
@@ -425,42 +314,17 @@ function PLRow({ label, values, total, bold, italic, color, indent = 0, clickabl
   return (
     <tr
       onClick={clickable ? onToggle : undefined}
-      style={{
-        borderBottom: `1px solid ${C.border}`,
-        cursor: clickable ? "pointer" : "default",
-        fontStyle: italic ? "italic" : "normal",
-        color: color || C.text,
-        fontWeight: bold ? 700 : 500,
-      }}
+      style={{ borderBottom: `1px solid ${C.border}`, cursor: clickable ? "pointer" : "default", fontStyle: italic ? "italic" : "normal", color: color || C.text, fontWeight: bold ? 700 : 500 }}
     >
       <td
         className="col-label"
-        style={{
-          padding: "7px 10px",
-          paddingLeft: 10 + indent,
-          fontSize: 12,
-          position: "sticky",
-          left: 0,
-          background: C.surface,
-          zIndex: 1,
-        }}
+        style={{ padding: "7px 10px", paddingLeft: 10 + indent, fontSize: 12, position: "sticky", left: 0, background: C.surface, zIndex: 1 }}
       >
-        {clickable && (
-          <span style={{ marginRight: 4, color: C.muted, fontSize: 10 }}>{open ? "▼" : "▶"}</span>
-        )}
+        {clickable && <span style={{ marginRight: 4, color: C.muted, fontSize: 10 }}>{open ? "▼" : "▶"}</span>}
         {label}
       </td>
       {values.map((v, i) => (
-        <td
-          key={i}
-          className="col-month"
-          style={{
-            textAlign: "right",
-            padding: "7px 6px",
-            fontSize: 12,
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
+        <td key={i} className="col-month" style={{ textAlign: "right", padding: "7px 6px", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
           {v}
         </td>
       ))}
@@ -471,7 +335,7 @@ function PLRow({ label, values, total, bold, italic, color, indent = 0, clickabl
   );
 }
 
-function PLTable({ rows, totals, data }) {
+function PLTable({ rows, totals, data, budget }) {
   const [openFixed, setOpenFixed] = useState(false);
   const [openCogs, setOpenCogs] = useState(false);
 
@@ -482,20 +346,7 @@ function PLTable({ rows, totals, data }) {
           <tr style={{ borderBottom: `1px solid ${C.border}` }}>
             <th
               className="col-label"
-              style={{
-                textAlign: "left",
-                padding: "8px 10px",
-                fontSize: 11,
-                fontWeight: 600,
-                color: C.muted,
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                position: "sticky",
-                left: 0,
-                background: C.surface,
-                minWidth: 260,
-                zIndex: 2,
-              }}
+              style={{ textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, position: "sticky", left: 0, background: C.surface, minWidth: 260, zIndex: 2 }}
             >
               Linha
             </th>
@@ -510,17 +361,14 @@ function PLTable({ rows, totals, data }) {
         <tbody>
           <PLRow
             label="Plano (meta mensal)"
-            italic
-            color={C.muted}
-            values={rows.map(() => fmt(MONTHLY_GOAL))}
-            total={fmt(ANNUAL_GOAL)}
+            italic color={C.muted}
+            values={rows.map(() => fmt(budget.monthly_goal))}
+            total={fmt(budget.annual_goal)}
           />
           <PLRow
             label="Receita Real / Prevista"
             values={rows.map((r) => (
-              <span style={{ color: r.isPast ? C.greenText : C.green, fontWeight: r.isPast ? 700 : 500 }}>
-                {fmtK(r.revenue)}
-              </span>
+              <span style={{ color: r.isPast ? C.greenText : C.green, fontWeight: r.isPast ? 700 : 500 }}>{fmtK(r.revenue)}</span>
             ))}
             total={<span style={{ color: C.greenText, fontWeight: 700 }}>{fmt(totals.revenue)}</span>}
             bold
@@ -528,45 +376,33 @@ function PLTable({ rows, totals, data }) {
           <PLRow
             label="Variância vs Plano"
             values={rows.map((r) => <VariancePill value={r.variance} faded={!r.isPast} />)}
-            total={<VariancePill value={totals.revenue - ANNUAL_GOAL} />}
+            total={<VariancePill value={totals.revenue - budget.annual_goal} />}
           />
 
-          {/* Fixed costs */}
           <PLRow
             label="Custos Fixos"
-            clickable
-            open={openFixed}
-            onToggle={() => setOpenFixed(!openFixed)}
+            clickable open={openFixed} onToggle={() => setOpenFixed(!openFixed)}
             values={rows.map((r) => <span style={{ color: C.red }}>-{fmtK(r.fixed)}</span>)}
             total={<span style={{ color: C.red, fontWeight: 700 }}>-{fmt(totals.fixed)}</span>}
           />
           {openFixed &&
-            Object.entries(FIXED_COSTS).map(([k, v]) => (
-              <PLRow
-                key={k}
-                label={k}
-                indent={16}
-                color={C.muted}
+            Object.entries(budget.fixed_costs).map(([k, v]) => (
+              <PLRow key={k} label={k} indent={16} color={C.muted}
                 values={rows.map(() => "-" + fmtK(v))}
                 total={"-" + fmt(v * 12)}
               />
             ))}
           {openFixed && (
             <PLRow
-              label="Salário"
-              indent={16}
-              color={C.muted}
-              values={rows.map((r) => (r.month === "Jan" ? "—" : "-" + fmtK(SALARY)))}
-              total={"-" + fmt(SALARY * 11)}
+              label="Salário" indent={16} color={C.muted}
+              values={rows.map((r) => (r.month === "Jan" ? "—" : "-" + fmtK(budget.salary)))}
+              total={"-" + fmt(budget.salary * 11)}
             />
           )}
 
-          {/* COGS */}
           <PLRow
             label="COGS Licenças Zoho"
-            clickable
-            open={openCogs}
-            onToggle={() => setOpenCogs(!openCogs)}
+            clickable open={openCogs} onToggle={() => setOpenCogs(!openCogs)}
             values={rows.map((r) => <span style={{ color: C.red }}>-{fmtK(r.cogs)}</span>)}
             total={<span style={{ color: C.red, fontWeight: 700 }}>-{fmt(totals.cogs)}</span>}
           />
@@ -575,12 +411,9 @@ function PLTable({ rows, totals, data }) {
               <PLRow
                 key={c.key}
                 label={`${c.client} (mensal)`}
-                indent={16}
-                color={C.muted}
-                values={rows.map((r) => (c.status[r.month] ? "-" + fmtK(c.monthly / MARGIN) : "—"))}
-                total={"-" + fmt(
-                  Object.keys(c.status).filter((m) => c.status[m]).length * (c.monthly / MARGIN)
-                )}
+                indent={16} color={C.muted}
+                values={rows.map((r) => (c.status[r.month] ? "-" + fmtK(c.monthly / budget.margin) : "—"))}
+                total={"-" + fmt(Object.keys(c.status).filter((m) => c.status[m]).length * (c.monthly / budget.margin))}
               />
             ))}
           {openCogs &&
@@ -588,10 +421,9 @@ function PLTable({ rows, totals, data }) {
               <PLRow
                 key={`al${i}`}
                 label={`${l.client} (renovação)`}
-                indent={16}
-                color={C.muted}
-                values={rows.map((r) => (r.month === l.month ? "-" + fmtK(l.amount / MARGIN) : "—"))}
-                total={"-" + fmt(l.amount / MARGIN)}
+                indent={16} color={C.muted}
+                values={rows.map((r) => (r.month === l.month ? "-" + fmtK(l.amount / budget.margin) : "—"))}
+                total={"-" + fmt(l.amount / budget.margin)}
               />
             ))}
 
@@ -610,18 +442,12 @@ function PLTable({ rows, totals, data }) {
           />
 
           <PLRow
-            label="Resultado Líquido (IRC 21%)"
+            label={`Resultado Líquido (IRC ${Math.round(budget.irc_rate * 100)}%)`}
             bold
             values={rows.map((r) => (
-              <span style={{ color: r.net >= 0 ? C.greenText : C.red, fontWeight: 700 }}>
-                {fmtK(r.net)}
-              </span>
+              <span style={{ color: r.net >= 0 ? C.greenText : C.red, fontWeight: 700 }}>{fmtK(r.net)}</span>
             ))}
-            total={
-              <span style={{ color: totals.net >= 0 ? C.greenText : C.red, fontWeight: 700 }}>
-                {fmt(totals.net)}
-              </span>
-            }
+            total={<span style={{ color: totals.net >= 0 ? C.greenText : C.red, fontWeight: 700 }}>{fmt(totals.net)}</span>}
           />
         </tbody>
       </table>
@@ -629,41 +455,44 @@ function PLTable({ rows, totals, data }) {
   );
 }
 
-export default function PLTab({ data, scenario, setScenario }) {
-  const pl = useMemo(() => computePL(data, scenario), [data, scenario]);
+export default function PLTab({ data, scenario, setScenario, budget, onEditBudget }) {
+  const pl = useMemo(() => computePL(data, scenario, budget), [data, scenario, budget]);
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <div style={{ fontSize: 13, color: C.muted }}>
-          Cenário aplicado a meses futuros. Meta anual: <strong>{fmt(ANNUAL_GOAL)}</strong> · Previsto:{" "}
+          Cenário aplicado a meses futuros. Meta anual: <strong>{fmt(budget.annual_goal)}</strong> · Previsto:{" "}
           <strong style={{ color: C.text }}>{fmt(pl.totals.revenue)}</strong>
         </div>
-        <ScenarioSelector scenario={scenario} setScenario={setScenario} />
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={onEditBudget}
+            style={{ padding: "6px 12px", border: `1px solid ${C.border}`, borderRadius: 6, background: C.surface, color: C.muted, fontSize: 12, fontWeight: 500, cursor: "pointer" }}
+          >
+            ✏️ Orçamento
+          </button>
+          <ScenarioSelector scenario={scenario} setScenario={setScenario} />
+        </div>
       </div>
 
-      <ProgressBar forecast={pl.totals.revenue} />
+      <ProgressBar forecast={pl.totals.revenue} annualGoal={budget.annual_goal} />
 
       <div style={{ marginTop: 14, padding: 14, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 }}>
         <div style={{ fontSize: 12, color: C.muted, marginBottom: 2 }}>Receita vs Custos por mês</div>
-        <BarChart rows={pl.rows} />
+        <BarChart rows={pl.rows} monthlyGoal={budget.monthly_goal} />
       </div>
 
-      <PLTable rows={pl.rows} totals={pl.totals} data={data} />
+      <PLTable rows={pl.rows} totals={pl.totals} data={data} budget={budget} />
 
       <div
         style={{
-          marginTop: 12,
-          padding: 12,
-          background: C.amberLight,
-          border: `1px solid ${C.amberBorder}`,
-          borderRadius: 8,
-          fontSize: 12,
-          color: C.amberText,
-          lineHeight: 1.6,
+          marginTop: 12, padding: 12,
+          background: C.amberLight, border: `1px solid ${C.amberBorder}`,
+          borderRadius: 8, fontSize: 12, color: C.amberText, lineHeight: 1.6,
         }}
       >
-        <strong>Nota COGS:</strong> As licenças Zoho são pass-through com margem garantida de 18%. COGS representa{" "}
+        <strong>Nota COGS:</strong> As licenças Zoho são pass-through com margem garantida de {Math.round((budget.margin - 1) * 100)}%. COGS representa{" "}
         <strong>risco de timing de cashflow</strong> (pagar Zoho antes de receber do cliente), não problema de margem.
         Especialmente relevante em <strong>Novembro</strong> (Leasys PT: saída ~€57k antes de receber ~€67k).
       </div>
