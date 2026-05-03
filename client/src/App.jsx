@@ -44,7 +44,7 @@ function computeNetResult(data, budget) {
   return Math.round(net - preTax * budget.irc_rate);
 }
 
-function Header({ data, lastRefresh, loading, onReload, onLogout, annualGoal }) {
+function Header({ data, lastRefresh, loading, onReload, onLogout, annualGoal, onEditBudget }) {
   return (
     <div
       className="header-row"
@@ -90,7 +90,23 @@ function Header({ data, lastRefresh, loading, onReload, onLogout, annualGoal }) 
         </div>
       </div>
 
-      <div className="header-actions" style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+      <div className="header-actions" style={{ display: "flex", gap: 8, flexShrink: 0, alignItems: "center" }}>
+        <button
+          onClick={onEditBudget}
+          style={{
+            padding: "8px 14px",
+            border: `1.5px solid ${C.border}`,
+            background: C.surface,
+            color: C.muted,
+            borderRadius: 9,
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          ✏️ Orçamento
+        </button>
         <button
           onClick={onReload}
           disabled={loading}
@@ -220,6 +236,7 @@ export default function App() {
           onReload={reload}
           onLogout={logout}
           annualGoal={budget.annual_goal}
+          onEditBudget={() => setBudgetEditorOpen(true)}
         />
 
         {data && (

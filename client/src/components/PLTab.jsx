@@ -482,15 +482,7 @@ export default function PLTab({ data, scenario, setScenario, budget, onEditBudge
           Cenário aplicado a meses futuros. Meta anual: <strong>{fmt(budget.annual_goal)}</strong> · Previsto:{" "}
           <strong style={{ color: C.text }}>{fmt(pl.totals.revenue)}</strong>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button
-            onClick={onEditBudget}
-            style={{ padding: "6px 12px", border: `1px solid ${C.border}`, borderRadius: 6, background: C.surface, color: C.muted, fontSize: 12, fontWeight: 500, cursor: "pointer" }}
-          >
-            ✏️ Orçamento
-          </button>
-          <ScenarioSelector scenario={scenario} setScenario={setScenario} />
-        </div>
+        <ScenarioSelector scenario={scenario} setScenario={setScenario} />
       </div>
 
       <ProgressBar forecast={pl.totals.revenue} annualGoal={budget.annual_goal} />

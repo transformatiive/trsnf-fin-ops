@@ -2,7 +2,7 @@ const axios = require("axios");
 const { buildDashboard } = require("./dashboard");
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-const MODEL = "anthropic/claude-sonnet-4-6";
+const MODEL = "anthropic/claude-3.5-sonnet";
 
 function fmtEur(n) {
   return "€" + Math.round(Number(n) || 0).toLocaleString("pt-PT");
