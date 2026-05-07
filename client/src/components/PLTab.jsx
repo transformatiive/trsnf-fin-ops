@@ -3,6 +3,8 @@ import { C, MONTHS, MONTHS_PT } from "../utils/constants";
 import { fmt, fmtK } from "../utils/fmt";
 import { getOccurrenceMonths, annualOccurrences } from "../hooks/useBudget";
 
+// ─── Data helpers ────────────────────────────────────────────────────────────
+
 function revenueByMonth(data) {
   const r = {};
   for (const m of MONTHS) {
@@ -30,6 +32,12 @@ function cogsForMonth(m, data, margin) {
     if (l.month === m) cogs += l.amount / margin;
   }
   return cogs;
+}
+
+function annualCogsForMonth(m, data, margin) {
+  return (data.licence_pipeline?.annual_licences || [])
+    .filter((l) => l.month === m)
+    .reduce((a, l) => a + l.amount / margin, 0);
 }
 
 function fixedCostsForMonth(m, budget) {
@@ -61,7 +69,7 @@ function ivaPayments(revenue, data, margin) {
   return pay;
 }
 
-function computePL(data, scenario, budget) {
+function computePL(data, scenario, budget, accrualMode) {
   const multiplier = scenario === "conservative" ? 0.7 : scenario === "optimistic" ? 1.3 : 1.0;
   const todayIdx = new Date().getMonth();
   const revenue = revenueByMonth(data);
@@ -70,7 +78,11 @@ function computePL(data, scenario, budget) {
   const revenueAdjusted = {};
   for (let i = 0; i < 12; i++) {
     const m = MONTHS[i];
-    revenueAdjusted[m] = i <= todayIdx ? actuals[m] : (revenue[m] || 0) * multiplier;
+    if (accrualMode === "cash") {
+      revenueAdjusted[m] = actuals[m];
+    } else {
+      revenueAdjusted[m] = i <= todayIdx ? actuals[m] : (revenue[m] || 0) * multiplier;
+    }
   }
 
   const iva = ivaPayments(revenueAdjusted, data, budget.margin);
@@ -111,6 +123,39 @@ function computePL(data, scenario, budget) {
   };
 
   return { rows, totals, multiplier, todayIdx };
+}
+
+// ─── UI components ────────────────────────────────────────────────────────────
+
+function AccrualToggle({ mode, setMode }) {
+  const opts = [
+    { key: "accrual", label: "Accrual" },
+    { key: "cash",    label: "Cash" },
+  ];
+  return (
+    <div style={{ display: "flex", border: `1px solid ${C.border}`, borderRadius: 7, overflow: "hidden" }}>
+      {opts.map((o) => (
+        <button
+          key={o.key}
+          onClick={() => setMode(o.key)}
+          title={o.key === "accrual" ? "Faturado + pipeline" : "Apenas recebido"}
+          style={{
+            padding: "5px 14px",
+            border: "none",
+            borderRight: o.key === "accrual" ? `1px solid ${C.border}` : "none",
+            background: mode === o.key ? C.text : "transparent",
+            color: mode === o.key ? "#fff" : C.muted,
+            fontSize: 12,
+            fontWeight: mode === o.key ? 700 : 500,
+            cursor: "pointer",
+            transition: "background 0.15s, color 0.15s",
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function ScenarioSelector({ scenario, setScenario }) {
@@ -209,24 +254,12 @@ function Tooltip({ row, anchorRef, monthlyGoal }) {
             {row.revenue >= monthlyGoal ? "+" : ""}{fmt(row.revenue - monthlyGoal)}
           </span>
         </div>
-        <div
-          style={{
-            borderTop: "1px solid rgba(255,255,255,0.15)",
-            marginTop: 4, paddingTop: 4,
-            display: "flex", justifyContent: "space-between", gap: 24,
-          }}
-        >
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.15)", marginTop: 4, paddingTop: 4, display: "flex", justifyContent: "space-between", gap: 24 }}>
           <span style={{ fontWeight: 600 }}>Líquido</span>
           <span style={{ fontWeight: 700, color: netPositive ? "#4ade80" : "#f87171" }}>{fmt(row.net)}</span>
         </div>
       </div>
-      <div
-        style={{
-          position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%)",
-          width: 10, height: 10, background: "#1a1a1a",
-          clipPath: "polygon(0 0, 100% 0, 50% 100%)",
-        }}
-      />
+      <div style={{ position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%)", width: 10, height: 10, background: "#1a1a1a", clipPath: "polygon(0 0, 100% 0, 50% 100%)" }} />
     </div>
   );
 }
@@ -265,7 +298,6 @@ function BarChart({ rows, monthlyGoal }) {
           const revH = Math.max(2, (r.revenue / max) * H);
           const costH = Math.max(2, ((r.fixed + r.cogs + r.oneOff + r.iva) / max) * H);
           const isHovered = hover?.month === r.month;
-
           return (
             <div
               key={r.month}
@@ -302,17 +334,30 @@ function BarChart({ rows, monthlyGoal }) {
 function VariancePill({ value, faded }) {
   const positive = value >= 0;
   return (
-    <span
-      style={{
-        padding: "2px 6px",
-        background: positive ? C.greenLight : C.redLight,
-        color: positive ? C.greenText : C.red,
-        border: `1px solid ${positive ? C.greenBorder : "#fecaca"}`,
-        borderRadius: 10, fontSize: 10, fontWeight: 600,
-        opacity: faded ? 0.5 : 1, fontVariantNumeric: "tabular-nums",
-      }}
-    >
+    <span style={{ padding: "2px 6px", background: positive ? C.greenLight : C.redLight, color: positive ? C.greenText : C.red, border: `1px solid ${positive ? C.greenBorder : "#fecaca"}`, borderRadius: 10, fontSize: 10, fontWeight: 600, opacity: faded ? 0.5 : 1, fontVariantNumeric: "tabular-nums" }}>
       {positive ? "+" : ""}{fmtK(value)}
+    </span>
+  );
+}
+
+function CashflowRiskBadge({ annualCogs, clients }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span
+      style={{ position: "relative", cursor: "help", marginRight: 3, fontSize: 11 }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      ⚠️
+      {show && (
+        <span style={{ position: "absolute", bottom: "calc(100% + 6px)", right: 0, background: "#1a1a1a", color: "#fff", borderRadius: 8, padding: "9px 12px", fontSize: 11, whiteSpace: "nowrap", zIndex: 50, boxShadow: "0 4px 20px rgba(0,0,0,0.3)", display: "block" }}>
+          <span style={{ display: "block", fontWeight: 700, marginBottom: 5 }}>⚠️ Risco de cashflow</span>
+          {clients.map((c, i) => (
+            <span key={i} style={{ display: "block", opacity: 0.85 }}>{c.client}: COGS {fmt(c.cogs)}</span>
+          ))}
+          <span style={{ display: "block", marginTop: 5, opacity: 0.6, fontSize: 10 }}>Pagamento Zoho precede recebimento do cliente</span>
+        </span>
+      )}
     </span>
   );
 }
@@ -323,10 +368,7 @@ function PLRow({ label, values, total, bold, italic, color, indent = 0, clickabl
       onClick={clickable ? onToggle : undefined}
       style={{ borderBottom: `1px solid ${C.border}`, cursor: clickable ? "pointer" : "default", fontStyle: italic ? "italic" : "normal", color: color || C.text, fontWeight: bold ? 700 : 500 }}
     >
-      <td
-        className="col-label"
-        style={{ padding: "7px 10px", paddingLeft: 10 + indent, fontSize: 12, position: "sticky", left: 0, background: C.surface, zIndex: 1 }}
-      >
+      <td className="col-label" style={{ padding: "7px 10px", paddingLeft: 10 + indent, fontSize: 12, position: "sticky", left: 0, background: C.surface, zIndex: 1 }}>
         {clickable && <span style={{ marginRight: 4, color: C.muted, fontSize: 10 }}>{open ? "▼" : "▶"}</span>}
         {label}
       </td>
@@ -342,19 +384,18 @@ function PLRow({ label, values, total, bold, italic, color, indent = 0, clickabl
   );
 }
 
-function PLTable({ rows, totals, data, budget }) {
+function PLTable({ rows, totals, data, budget, accrualMode }) {
   const [openFixed, setOpenFixed] = useState(false);
   const [openCogs, setOpenCogs] = useState(false);
+
+  const revenueLabel = accrualMode === "cash" ? "Receita Recebida (Cash)" : "Receita Faturada / Prevista (Accrual)";
 
   return (
     <div className="table-scroll" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 16 }}>
       <table className="dash-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-            <th
-              className="col-label"
-              style={{ textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, position: "sticky", left: 0, background: C.surface, minWidth: 260, zIndex: 2 }}
-            >
+            <th className="col-label" style={{ textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, position: "sticky", left: 0, background: C.surface, minWidth: 260, zIndex: 2 }}>
               Linha
             </th>
             {MONTHS_PT.map((m) => (
@@ -373,12 +414,12 @@ function PLTable({ rows, totals, data, budget }) {
             total={fmt(budget.annual_goal)}
           />
           <PLRow
-            label="Receita Real / Prevista"
+            label={revenueLabel}
+            bold
             values={rows.map((r) => (
               <span style={{ color: r.isPast ? C.greenText : C.green, fontWeight: r.isPast ? 700 : 500 }}>{fmtK(r.revenue)}</span>
             ))}
             total={<span style={{ color: C.greenText, fontWeight: 700 }}>{fmt(totals.revenue)}</span>}
-            bold
           />
           <PLRow
             label="Variância vs Plano"
@@ -420,7 +461,17 @@ function PLTable({ rows, totals, data, budget }) {
           <PLRow
             label="COGS Licenças Zoho"
             clickable open={openCogs} onToggle={() => setOpenCogs(!openCogs)}
-            values={rows.map((r) => <span style={{ color: C.red }}>-{fmtK(r.cogs)}</span>)}
+            values={rows.map((r) => {
+              const annualRisk = (data.licence_pipeline?.annual_licences || [])
+                .filter((l) => l.month === r.month)
+                .map((l) => ({ client: l.client, cogs: l.amount / budget.margin }));
+              return (
+                <span style={{ color: C.red, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 2 }}>
+                  {annualRisk.length > 0 && <CashflowRiskBadge annualCogs={annualRisk.reduce((a, c) => a + c.cogs, 0)} clients={annualRisk} />}
+                  -{fmtK(r.cogs)}
+                </span>
+              );
+            })}
             total={<span style={{ color: C.red, fontWeight: 700 }}>-{fmt(totals.cogs)}</span>}
           />
           {openCogs &&
@@ -437,7 +488,7 @@ function PLTable({ rows, totals, data, budget }) {
             (data.licence_pipeline?.annual_licences || []).map((l, i) => (
               <PLRow
                 key={`al${i}`}
-                label={`${l.client} (renovação)`}
+                label={`${l.client} (renovação anual)`}
                 indent={16} color={C.muted}
                 values={rows.map((r) => (r.month === l.month ? "-" + fmtK(l.amount / budget.margin) : "—"))}
                 total={"-" + fmt(l.amount / budget.margin)}
@@ -466,14 +517,30 @@ function PLTable({ rows, totals, data, budget }) {
             ))}
             total={<span style={{ color: totals.net >= 0 ? C.greenText : C.red, fontWeight: 700 }}>{fmt(totals.net)}</span>}
           />
+
+          <PLRow
+            label="Margem Líquida %"
+            italic color={C.muted}
+            values={rows.map((r) => {
+              if (!r.revenue) return <span style={{ color: C.faint }}>—</span>;
+              const pct = (r.net / r.revenue) * 100;
+              return <span style={{ color: pct >= 0 ? C.greenText : C.red, fontStyle: "italic" }}>{pct.toFixed(1)}%</span>;
+            })}
+            total={(() => {
+              if (!totals.revenue) return <span style={{ color: C.faint }}>—</span>;
+              const pct = (totals.net / totals.revenue) * 100;
+              return <span style={{ color: pct >= 0 ? C.greenText : C.red, fontWeight: 700 }}>{pct.toFixed(1)}%</span>;
+            })()}
+          />
         </tbody>
       </table>
     </div>
   );
 }
 
-export default function PLTab({ data, scenario, setScenario, budget, onEditBudget }) {
-  const pl = useMemo(() => computePL(data, scenario, budget), [data, scenario, budget]);
+export default function PLTab({ data, scenario, setScenario, budget }) {
+  const [accrualMode, setAccrualMode] = useState("accrual");
+  const pl = useMemo(() => computePL(data, scenario, budget, accrualMode), [data, scenario, budget, accrualMode]);
 
   return (
     <div>
@@ -482,7 +549,10 @@ export default function PLTab({ data, scenario, setScenario, budget, onEditBudge
           Cenário aplicado a meses futuros. Meta anual: <strong>{fmt(budget.annual_goal)}</strong> · Previsto:{" "}
           <strong style={{ color: C.text }}>{fmt(pl.totals.revenue)}</strong>
         </div>
-        <ScenarioSelector scenario={scenario} setScenario={setScenario} />
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <AccrualToggle mode={accrualMode} setMode={setAccrualMode} />
+          <ScenarioSelector scenario={scenario} setScenario={setScenario} />
+        </div>
       </div>
 
       <ProgressBar forecast={pl.totals.revenue} annualGoal={budget.annual_goal} />
@@ -492,18 +562,12 @@ export default function PLTab({ data, scenario, setScenario, budget, onEditBudge
         <BarChart rows={pl.rows} monthlyGoal={budget.monthly_goal} />
       </div>
 
-      <PLTable rows={pl.rows} totals={pl.totals} data={data} budget={budget} />
+      <PLTable rows={pl.rows} totals={pl.totals} data={data} budget={budget} accrualMode={accrualMode} />
 
-      <div
-        style={{
-          marginTop: 12, padding: 12,
-          background: C.amberLight, border: `1px solid ${C.amberBorder}`,
-          borderRadius: 8, fontSize: 12, color: C.amberText, lineHeight: 1.6,
-        }}
-      >
+      <div style={{ marginTop: 12, padding: 12, background: C.amberLight, border: `1px solid ${C.amberBorder}`, borderRadius: 8, fontSize: 12, color: C.amberText, lineHeight: 1.6 }}>
         <strong>Nota COGS:</strong> As licenças Zoho são pass-through com margem garantida de {Math.round((budget.margin - 1) * 100)}%. COGS representa{" "}
         <strong>risco de timing de cashflow</strong> (pagar Zoho antes de receber do cliente), não problema de margem.
-        Especialmente relevante em <strong>Novembro</strong> (Leasys PT: saída ~€57k antes de receber ~€67k).
+        Meses com renovações anuais estão assinalados com ⚠️ na linha COGS.
       </div>
     </div>
   );
