@@ -1,40 +1,56 @@
 const books = require("../services/zoho-books");
-const moloni = require("../services/moloni");
 const partner = require("../services/zoho-partner");
 const forex = require("../services/forex");
 const config = require("../config");
-const CLIENT_MAP = require("../client-map");
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-let cache = { data: null, expires: 0 };
+// Cache per fiscal year.
+const cacheByYear = new Map(); // year -> { data, expires }
 const CACHE_TTL = 5 * 60 * 1000;
 
+function monthIdx(dateStr) {
+  if (!dateStr) return -1;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return -1;
+  return d.getMonth();
+}
+
 function monthKey(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  return MONTHS[d.getMonth()];
+  const i = monthIdx(dateStr);
+  return i === -1 ? null : MONTHS[i];
 }
 
-function bucketMonthForOverdue(dateStr, today = new Date()) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  if (d < today) return MONTHS[today.getMonth()];
-  return MONTHS[d.getMonth()];
-}
-
-function emptyMonthMap() {
+function emptyByMonth(extra = {}) {
   const m = {};
-  MONTHS.forEach((k) => (m[k] = { total: 0, items: [] }));
+  MONTHS.forEach((k) => (m[k] = { total: 0, items: [], ...JSON.parse(JSON.stringify(extra)) }));
   return m;
 }
 
-function sumMonthMap(m) {
-  let t = 0;
-  for (const k of Object.keys(m)) t += m[k].total || 0;
-  return Math.round(t);
+function sumTotals(byMonth) {
+  return Math.round(MONTHS.reduce((a, k) => a + (byMonth[k]?.total || 0), 0));
+}
+
+// ─── Line-item classification: licença vs serviço ────────────────────────────
+function isLicenceText(txt) {
+  const t = (txt || "").toLowerCase();
+  return config.licence_keywords.some((k) => t.includes(k));
+}
+
+function classifyLine(li) {
+  const txt = `${li.name || ""} ${li.description || ""} ${li.item_type || ""}`;
+  return isLicenceText(txt) ? "licence" : "service";
+}
+
+function splitLineItems(lineItems) {
+  let services = 0;
+  let licences = 0;
+  for (const li of lineItems || []) {
+    const amt = Number(li.item_total ?? li.total ?? 0);
+    if (classifyLine(li) === "licence") licences += amt;
+    else services += amt;
+  }
+  return { services, licences };
 }
 
 function buildSoDesc(lineItems) {
@@ -47,76 +63,73 @@ function buildSoDesc(lineItems) {
   return descs.join(" · ") + suffix;
 }
 
-async function buildPaid(year, receipts) {
-  const paid = await books.fetchInvoices("paid", year).catch(() => []);
-  const byMonth = emptyMonthMap();
-  const receiptedInvoiceIds = new Set();
-  if (Array.isArray(receipts)) {
-    for (const r of receipts) {
-      const docs = r.associated_documents || r.documents || [];
-      for (const doc of docs) {
-        if (doc.reference) receiptedInvoiceIds.add(String(doc.reference));
-        if (doc.number) receiptedInvoiceIds.add(String(doc.number));
-      }
-    }
-  }
+// ─── FATURAÇÃO (actual invoiced, by invoice date) ────────────────────────────
+async function buildInvoiced(year) {
+  const invoices = await books.fetchAllInvoices(year).catch(() => []);
+  const invoiced = emptyByMonth();
+  const paid = emptyByMonth();
+  const receivable = { total: 0, overdue: 0, current: 0, by_due_month: emptyByMonth({ overdue: 0 }) };
 
-  for (const inv of paid) {
+  const today = new Date();
+
+  for (const inv of invoices) {
     if (inv.customer_name === "TESTE") continue;
     const mk = monthKey(inv.date || inv.invoice_date);
     if (!mk) continue;
-    const amount = Number(inv.total || 0);
-    byMonth[mk].total += amount;
-    byMonth[mk].items.push({
+    const total = Number(inv.total || 0);
+    const balance = Number(inv.balance || 0);
+    const status = (inv.status || "").toLowerCase();
+
+    invoiced[mk].total += total;
+    invoiced[mk].items.push({
       invoice_id: inv.invoice_id,
       number: inv.invoice_number,
       client: inv.customer_name,
-      amount,
+      amount: total,
+      balance,
       date: inv.date,
-      receipted: receiptedInvoiceIds.has(String(inv.invoice_number)),
-      moloni_id: CLIENT_MAP[inv.customer_name]?.moloni_id || null,
-    });
-  }
-  return byMonth;
-}
-
-async function buildBilled(year) {
-  const today = new Date();
-  const [unpaid, overdue] = await Promise.all([
-    books.fetchInvoices("unpaid", year).catch(() => []),
-    books.fetchInvoices("overdue", year).catch(() => []),
-  ]);
-
-  const seen = new Set();
-  const all = [];
-  for (const inv of [...unpaid, ...overdue]) {
-    if (seen.has(inv.invoice_id)) continue;
-    seen.add(inv.invoice_id);
-    all.push(inv);
-  }
-
-  const byMonth = emptyMonthMap();
-  for (const inv of all) {
-    if (inv.customer_name === "TESTE") continue;
-    const mk = bucketMonthForOverdue(inv.due_date || inv.date, today);
-    if (!mk) continue;
-    const amount = Number(inv.balance || inv.total || 0);
-    byMonth[mk].total += amount;
-    byMonth[mk].items.push({
-      invoice_id: inv.invoice_id,
-      number: inv.invoice_number,
-      client: inv.customer_name,
-      amount,
       due_date: inv.due_date,
-      status: inv.status,
-      is_overdue: inv.status === "overdue",
+      status,
     });
+
+    // Cash view: amount actually received = total - balance.
+    const received = total - balance;
+    if (received > 0) {
+      paid[mk].total += received;
+      paid[mk].items.push({
+        invoice_id: inv.invoice_id,
+        number: inv.invoice_number,
+        client: inv.customer_name,
+        amount: received,
+        date: inv.date,
+      });
+    }
+
+    // AR: outstanding balances.
+    if (balance > 0.01) {
+      const isOverdue = status === "overdue" || (inv.due_date && new Date(inv.due_date) < today);
+      receivable.total += balance;
+      if (isOverdue) receivable.overdue += balance;
+      else receivable.current += balance;
+      const dueMk = monthKey(inv.due_date || inv.date) || mk;
+      receivable.by_due_month[dueMk].total += balance;
+      if (isOverdue) receivable.by_due_month[dueMk].overdue += balance;
+      receivable.by_due_month[dueMk].items.push({
+        invoice_id: inv.invoice_id,
+        number: inv.invoice_number,
+        client: inv.customer_name,
+        amount: balance,
+        due_date: inv.due_date,
+        is_overdue: isOverdue,
+      });
+    }
   }
-  return byMonth;
+
+  return { invoiced, paid, receivable };
 }
 
-async function buildSoPending() {
-  const today = new Date();
+// ─── POR FATURAR (open SO backlog, split serviços/licenças) ──────────────────
+async function buildToInvoice() {
   const [open, partial] = await Promise.all([
     books.fetchSalesOrders("open").catch(() => []),
     books.fetchSalesOrders("partially_invoiced").catch(() => []),
@@ -130,7 +143,6 @@ async function buildSoPending() {
     all.push(so);
   }
 
-  // Filter out partner & TESTE
   const filtered = all.filter((so) => {
     const ref = (so.reference_number || "").toUpperCase();
     if (ref.includes("PARTNER")) return false;
@@ -138,7 +150,6 @@ async function buildSoPending() {
     return true;
   });
 
-  // Fetch line items detail in parallel (limit concurrency)
   const detailed = await Promise.all(
     filtered.map(async (so) => {
       try {
@@ -150,237 +161,275 @@ async function buildSoPending() {
     })
   );
 
-  const byMonth = emptyMonthMap();
+  const byMonth = emptyByMonth({ services: 0, licences: 0 });
+  const items = [];
+
   for (const so of detailed) {
-    const remaining = Number(so.total || 0) - Number(so.invoiced_amount || 0);
-    if (remaining <= 0) continue;
-    const mk = bucketMonthForOverdue(so.shipment_date || so.date, today);
+    const total = Number(so.total || 0);
+    const invoicedAmt = Number(so.invoiced_amount || 0);
+    const remaining = total - invoicedAmt;
+    if (remaining <= 0.01) continue;
+
+    const mk = monthKey(so.shipment_date || so.date) || monthKey(so.date);
     if (!mk) continue;
+
+    // Split remaining pro-rata by the SO's services/licences composition.
+    const { services: svcFull, licences: licFull } = splitLineItems(so.line_items);
+    const gross = svcFull + licFull || total;
+    const ratioLic = gross > 0 ? licFull / gross : 0;
+    const licences = Math.round(remaining * ratioLic * 100) / 100;
+    const services = Math.round((remaining - licences) * 100) / 100;
+
     byMonth[mk].total += remaining;
-    byMonth[mk].items.push({
+    byMonth[mk].services += services;
+    byMonth[mk].licences += licences;
+    const item = {
       salesorder_id: so.salesorder_id,
       so_number: so.salesorder_number,
       client: so.customer_name,
       amount: remaining,
+      services,
+      licences,
       shipment_date: so.shipment_date,
       desc: buildSoDesc(so.line_items),
-    });
+    };
+    byMonth[mk].items.push(item);
+    items.push({ ...item, month: mk });
   }
-  return byMonth;
+
+  return {
+    by_month: byMonth,
+    items,
+    total: sumTotals(byMonth),
+    services_total: Math.round(MONTHS.reduce((a, m) => a + byMonth[m].services, 0)),
+    licences_total: Math.round(MONTHS.reduce((a, m) => a + byMonth[m].licences, 0)),
+  };
 }
 
-async function buildLicencePipeline(year, booksSoNumbers) {
-  const pipeline = {
-    monthly_clients: [],
-    annual_licences: [],
-    by_month: {},
-  };
-  MONTHS.forEach((m) => (pipeline.by_month[m] = 0));
+// ─── RENOVAÇÕES ZOHO (Partner Store) ─────────────────────────────────────────
+async function buildLicenceRenewals(booksSoCustomers) {
+  const byMonth = {};
+  MONTHS.forEach((m) => (byMonth[m] = 0));
+  const items = [];
+  let alreadyInBooksTotal = 0;
 
-  // MONTHLY CLIENTS — derive status per month via Books invoices lookup
-  // Status is populated by caller (needs invoice context); keep structure for now
-  for (const c of config.monthly_clients) {
-    const startIdx = MONTHS.indexOf(c.start || "Jan");
-    const status = {};
-    for (let i = 0; i < 12; i++) {
-      status[MONTHS[i]] = i < startIdx ? null : "pending";
-    }
-    pipeline.monthly_clients.push({
-      ...c,
-      status,
-    });
-  }
-
-  // ANNUAL RENEWALS from Partner Store
   try {
     const subs = await partner.fetchAllSubscriptions();
     const now = new Date();
     const horizon = new Date();
     horizon.setDate(horizon.getDate() + 365);
 
-    let included = 0;
     for (const sub of subs) {
-      // Only include active subscriptions (Zoho status "live")
       const st = (sub.status || "").toLowerCase();
       if (!["live", "active"].includes(st)) continue;
 
-      // Partner Store uses next_recurring_date as the renewal date field
       const renewalRaw =
-        sub.next_recurring_date ||
-        sub.next_billing_date ||
-        sub.renewal_date ||
-        sub.expires_on ||
-        sub.expiry_date ||
-        sub.end_date;
+        sub.next_recurring_date || sub.next_billing_date || sub.renewal_date ||
+        sub.expires_on || sub.expiry_date || sub.end_date;
       if (!renewalRaw) continue;
-      // Zoho dates are YYYY-MM-DD — parse as UTC midnight to avoid timezone shift
       const d = renewalRaw.includes("T") ? new Date(renewalRaw) : new Date(renewalRaw + "T00:00:00Z");
       if (isNaN(d) || d < now || d > horizon) continue;
 
       const origCurrency = (sub.currency || "EUR").toUpperCase();
       const origAmount = Number(
-        sub.next_recurring_amount ||
-          sub.total ||
-          sub.amount ||
-          sub.net_amount ||
-          sub.reseller_price ||
-          sub.price ||
-          0
+        sub.next_recurring_amount || sub.total || sub.amount || sub.net_amount ||
+        sub.reseller_price || sub.price || 0
       );
-      // Convert reseller price to EUR at today's live rate
       const resellerPriceEUR = Math.round((await forex.toEUR(origAmount, origCurrency)) * 100) / 100;
       const clientPrice = Math.round(resellerPriceEUR * config.zoho_licence_margin * 100) / 100;
-      const mk = MONTHS[d.getMonth()];
-      // Partner Store uses customer_company_name
+      const mk = MONTHS[d.getUTCMonth()];
       const clientName =
-        sub.customer_company_name ||
-        sub.customer_name ||
-        sub.contact_name ||
-        sub.company_name ||
-        sub.email_id ||
-        sub.email ||
-        "—";
+        sub.customer_company_name || sub.customer_name || sub.contact_name ||
+        sub.company_name || sub.email_id || sub.email || "—";
       const service =
         sub.service_name || sub.product_name || sub.plan_name || sub.plan_code || sub.service || "—";
 
-      const soMatch = booksSoNumbers && booksSoNumbers.has(clientName);
+      const alreadyInBooks = booksSoCustomers && booksSoCustomers.has(clientName);
 
-      // e.g. "2026-04" for April 2026 — used to group on the client
-      const month_key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-
-      pipeline.annual_licences.push({
+      items.push({
         store: sub._store,
         client: clientName,
         service,
         month: mk,
-        month_key,
         year: d.getUTCFullYear(),
         amount: clientPrice,
         reseller_price: resellerPriceEUR,
+        margin: Math.round((clientPrice - resellerPriceEUR)),
         orig_amount: origAmount,
         orig_currency: origCurrency,
         renewal_date: renewalRaw,
-        already_in_books: !!soMatch,
+        already_in_books: !!alreadyInBooks,
         status: sub.status || "live",
       });
 
-      pipeline.by_month[mk] = (pipeline.by_month[mk] || 0) + clientPrice;
-      included++;
+      // Only count renewals NOT already captured as a Books SO (avoids double count).
+      if (alreadyInBooks) {
+        alreadyInBooksTotal += clientPrice;
+      } else {
+        byMonth[mk] += clientPrice;
+      }
     }
-    console.log(`[partner] ${subs.length} subs fetched, ${included} within 365-day horizon`);
   } catch (err) {
     console.error("Partner subs error:", err.message);
   }
 
-  // Add monthly clients to by_month
-  for (const c of pipeline.monthly_clients) {
-    const startIdx = MONTHS.indexOf(c.start || "Jan");
-    for (let i = 0; i < 12; i++) {
-      if (i < startIdx) continue;
-      pipeline.by_month[MONTHS[i]] = (pipeline.by_month[MONTHS[i]] || 0) + c.monthly;
-    }
-  }
-
-  return pipeline;
+  return {
+    by_month: byMonth,
+    items: items.sort((a, b) => MONTHS.indexOf(a.month) - MONTHS.indexOf(b.month)),
+    total: Math.round(MONTHS.reduce((a, m) => a + byMonth[m], 0)),
+    already_in_books_total: Math.round(alreadyInBooksTotal),
+  };
 }
 
-function deriveMonthlyClientStatus(pipeline, paidData, billedData) {
-  // Given paid+billed invoice lists, set status for each (client, month) pair
-  const matchClient = (clientKey, invoiceClient) => {
-    if (!invoiceClient) return false;
-    const ic = invoiceClient.toLowerCase();
-    if (clientKey === "hifly") return ic.includes("hi fly");
-    if (clientKey === "unicenter") return ic.includes("unicenter");
-    if (clientKey === "yourbranding") return ic.includes("yourbranding") || ic.includes("your orange");
-    if (clientKey === "art") return ic.includes("automated retail") || ic.includes("automated rt");
+// ─── RECORRENTES PREVISTOS (monthly clients, future months not yet invoiced) ─
+function buildRecurringForecast(invoiced, year) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentIdx = year < currentYear ? 12 : year > currentYear ? -1 : now.getMonth();
+
+  const matchClient = (key, name) => {
+    if (!name) return false;
+    const ic = name.toLowerCase();
+    if (key === "hifly") return ic.includes("hi fly") || ic.includes("hifly");
+    if (key === "unicenter") return ic.includes("unicenter");
+    if (key === "yourbranding") return ic.includes("yourbranding") || ic.includes("your orange") || ic.includes("your branding");
+    if (key === "art") return ic.includes("automated retail") || ic.includes("automated rt");
     return false;
   };
 
-  for (const c of pipeline.monthly_clients) {
-    for (const m of MONTHS) {
-      if (c.status[m] === null) continue;
-      // check paid
-      const paidItems = paidData[m]?.items || [];
-      if (paidItems.some((it) => matchClient(c.key, it.client))) {
-        c.status[m] = "paid";
-        continue;
-      }
-      const billedItems = billedData[m]?.items || [];
-      if (billedItems.some((it) => matchClient(c.key, it.client))) {
-        c.status[m] = "billed";
-        continue;
-      }
-      // otherwise pending (default)
-    }
-  }
-}
+  const byMonth = {};
+  MONTHS.forEach((m) => (byMonth[m] = 0));
+  const clients = [];
 
-function buildArSummary(billed) {
-  const today = new Date();
-  let overdue = 0;
-  let dueFuture = 0;
-  for (const mk of MONTHS) {
-    for (const it of billed[mk]?.items || []) {
-      if (it.is_overdue) overdue += it.amount;
-      else dueFuture += it.amount;
+  for (const c of config.monthly_clients) {
+    const startIdx = MONTHS.indexOf(c.start || "Jan");
+    const months = {};
+    for (let i = 0; i < 12; i++) {
+      const m = MONTHS[i];
+      if (i < startIdx) { months[m] = null; continue; }
+      const invoicedThis = (invoiced[m]?.items || []).some((it) => matchClient(c.key, it.client));
+      if (invoicedThis) {
+        months[m] = "invoiced"; // already in real faturação — não somar
+      } else if (i >= currentIdx) {
+        months[m] = "forecast"; // futuro/corrente sem fatura → previsão
+        byMonth[m] += c.monthly;
+      } else {
+        months[m] = "missing"; // passado sem fatura → não faturado (a acompanhar)
+      }
     }
+    clients.push({ ...c, months });
   }
+
   return {
-    total: Math.round(overdue + dueFuture),
-    overdue: Math.round(overdue),
-    due_future: Math.round(dueFuture),
+    by_month: byMonth,
+    clients,
+    total: Math.round(MONTHS.reduce((a, m) => a + byMonth[m], 0)),
   };
 }
 
-async function buildDashboard() {
-  if (cache.data && Date.now() < cache.expires) {
-    return cache.data;
+// ─── DESPESA REAL (Books bills + expenses, by date) ──────────────────────────
+async function buildExpenses(year) {
+  const [bills, expenses] = await Promise.all([
+    books.fetchBills(year).catch(() => []),
+    books.fetchExpenses(year).catch(() => []),
+  ]);
+
+  const byMonth = emptyByMonth({ by_category: {} });
+
+  const add = (mk, amount, category, label, source) => {
+    if (!mk || !(amount > 0)) return;
+    byMonth[mk].total += amount;
+    byMonth[mk].by_category[category] = (byMonth[mk].by_category[category] || 0) + amount;
+    byMonth[mk].items.push({ amount, category, label, source });
+  };
+
+  for (const b of bills) {
+    const mk = monthKey(b.date);
+    add(mk, Number(b.total || 0), b.vendor_name || "Fornecedor", b.vendor_name || b.bill_number, "bill");
+  }
+  for (const e of expenses) {
+    const mk = monthKey(e.date);
+    const cat = e.account_name || e.category_name || e.paid_through_account_name || "Despesa";
+    add(mk, Number(e.total || 0), cat, e.description || cat, "expense");
   }
 
-  const year = config.fiscal_year;
+  // Round category maps.
+  for (const m of MONTHS) {
+    for (const k of Object.keys(byMonth[m].by_category)) {
+      byMonth[m].by_category[k] = Math.round(byMonth[m].by_category[k]);
+    }
+  }
 
-  const [receipts, soList] = await Promise.all([
-    moloni.getReceipts(year).catch(() => []),
-    books.fetchSalesOrders("open").catch(() => []),
+  return {
+    actual_by_month: byMonth,
+    actual_total: sumTotals(byMonth),
+    bills_count: bills.length,
+    expenses_count: expenses.length,
+  };
+}
+
+// ─── ORCHESTRATION ───────────────────────────────────────────────────────────
+async function buildDashboard(year) {
+  year = Number(year) || config.fiscal_year;
+
+  const cached = cacheByYear.get(year);
+  if (cached && Date.now() < cached.expires) return cached.data;
+
+  const soList = await books.fetchSalesOrders("open").catch(() => []);
+  const booksSoCustomers = new Set(soList.map((so) => so.customer_name).filter(Boolean));
+
+  const [{ invoiced, paid, receivable }, to_invoice, licence_renewals, expenses] = await Promise.all([
+    buildInvoiced(year),
+    buildToInvoice(),
+    buildLicenceRenewals(booksSoCustomers),
+    buildExpenses(year),
   ]);
 
-  const booksSoNumbers = new Set(soList.map((so) => so.customer_name).filter(Boolean));
+  const recurring_forecast = buildRecurringForecast(invoiced, year);
 
-  const [paid, billed, so_pending, licence_pipeline] = await Promise.all([
-    buildPaid(year, receipts),
-    buildBilled(year),
-    buildSoPending(),
-    buildLicencePipeline(year, booksSoNumbers),
-  ]);
+  const totals = {
+    invoiced: sumTotals(invoiced),
+    paid: sumTotals(paid),
+    receivable: Math.round(receivable.total),
+    receivable_overdue: Math.round(receivable.overdue),
+    to_invoice: to_invoice.total,
+    to_invoice_services: to_invoice.services_total,
+    to_invoice_licences: to_invoice.licences_total,
+    licence_renewals: licence_renewals.total,
+    recurring_forecast: recurring_forecast.total,
+    expenses_actual: expenses.actual_total,
+  };
+  // Faturação total prevista (sem sobreposição): já faturado + backlog de SOs +
+  // renovações Zoho ainda sem SO + recorrentes previstos para meses futuros.
+  totals.forecast_billing =
+    totals.invoiced + totals.to_invoice + totals.licence_renewals + totals.recurring_forecast;
 
-  deriveMonthlyClientStatus(licence_pipeline, paid, billed);
-
-  const ar_summary = buildArSummary(billed);
-  const ytd_paid = sumMonthMap(paid);
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const available_years = [];
+  for (let y = currentYear + 1; y >= currentYear - 2; y--) available_years.push(y);
 
   const data = {
     refreshed_at: new Date().toISOString(),
     fiscal_year: year,
+    available_years,
+    months: MONTHS,
+    invoiced,
     paid,
-    billed,
-    so_pending,
-    licence_pipeline,
-    ar_summary,
-    ytd_paid,
-    totals: {
-      paid: sumMonthMap(paid),
-      billed: sumMonthMap(billed),
-      so_pending: sumMonthMap(so_pending),
-      licence_pipeline: Object.values(licence_pipeline.by_month).reduce((a, b) => a + b, 0),
-    },
+    receivable,
+    to_invoice,
+    licence_renewals,
+    recurring_forecast,
+    expenses,
+    totals,
   };
 
-  cache = { data, expires: Date.now() + CACHE_TTL };
+  cacheByYear.set(year, { data, expires: Date.now() + CACHE_TTL });
   return data;
 }
 
 function invalidateCache() {
-  cache = { data: null, expires: 0 };
+  cacheByYear.clear();
 }
 
 module.exports = { buildDashboard, invalidateCache, MONTHS };

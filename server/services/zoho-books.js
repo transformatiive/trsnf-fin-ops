@@ -49,19 +49,68 @@ async function fetchInvoices(status, year) {
   let page = 1;
   let hasMore = true;
   while (hasMore) {
-    const data = await booksGet("/invoices", {
-      status,
+    const params = {
       date_start: `${year}-01-01`,
       date_end: `${year}-12-31`,
       per_page: 200,
       page,
-    });
+    };
+    // status omitted → all invoices for the period (used for actual faturação)
+    if (status && status !== "all") params.status = status;
+    const data = await booksGet("/invoices", params);
     if (data.invoices) all.push(...data.invoices);
     hasMore = data.page_context && data.page_context.has_more_page;
     page += 1;
     if (page > 20) break;
   }
   return all;
+}
+
+// All non-draft, non-void invoices issued in the year — the source of truth for
+// "faturação" (invoiced revenue), regardless of payment state.
+async function fetchAllInvoices(year) {
+  const all = await fetchInvoices("all", year);
+  return all.filter((inv) => !["draft", "void"].includes((inv.status || "").toLowerCase()));
+}
+
+// Vendor bills (accounts payable) for the year — real expense side.
+async function fetchBills(year) {
+  const all = [];
+  let page = 1;
+  let hasMore = true;
+  while (hasMore) {
+    const data = await booksGet("/bills", {
+      date_start: `${year}-01-01`,
+      date_end: `${year}-12-31`,
+      per_page: 200,
+      page,
+    });
+    if (data.bills) all.push(...data.bills);
+    hasMore = data.page_context && data.page_context.has_more_page;
+    page += 1;
+    if (page > 20) break;
+  }
+  return all.filter((b) => !["draft", "void"].includes((b.status || "").toLowerCase()));
+}
+
+// Direct expenses (petty cash, cards, etc.) for the year.
+async function fetchExpenses(year) {
+  const all = [];
+  let page = 1;
+  let hasMore = true;
+  while (hasMore) {
+    const data = await booksGet("/expenses", {
+      date_start: `${year}-01-01`,
+      date_end: `${year}-12-31`,
+      per_page: 200,
+      page,
+    });
+    if (data.expenses) all.push(...data.expenses);
+    hasMore = data.page_context && data.page_context.has_more_page;
+    page += 1;
+    if (page > 20) break;
+  }
+  return all.filter((e) => (e.status || "").toLowerCase() !== "void");
 }
 
 async function fetchSalesOrders(status) {
@@ -101,6 +150,9 @@ module.exports = {
   getToken,
   booksGet,
   fetchInvoices,
+  fetchAllInvoices,
+  fetchBills,
+  fetchExpenses,
   fetchSalesOrders,
   fetchSalesOrderDetail,
   healthCheck,
