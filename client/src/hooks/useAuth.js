@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 
-// Persisted in localStorage so the session survives browser closes.
-// The token has a 12h TTL enforced server-side, so this is safe.
-const STORAGE_KEY = "trnsf_session_token";
+// Access is granted by a token in the URL: ?token=…
+// The token is captured on load and persisted so refreshes/navigation keep working.
+const STORAGE_KEY = "trnsf_access_token";
 
-function readToken() {
+function tokenFromUrl() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    return p.get("token");
+  } catch {
+    return null;
+  }
+}
+
+function readStored() {
   try {
     return localStorage.getItem(STORAGE_KEY);
   } catch {
@@ -12,7 +21,7 @@ function readToken() {
   }
 }
 
-function writeToken(t) {
+function writeStored(t) {
   try {
     if (t) localStorage.setItem(STORAGE_KEY, t);
     else localStorage.removeItem(STORAGE_KEY);
@@ -20,66 +29,46 @@ function writeToken(t) {
 }
 
 export function useAuth() {
-  const [token, setToken] = useState(() => readToken());
+  const initial = tokenFromUrl() || readStored();
+  const [token, setToken] = useState(initial);
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let alive = true;
-    async function verify() {
-      const t = readToken();
-      if (!t) {
-        if (alive) setChecking(false);
-        return;
-      }
-      try {
-        const res = await fetch("/api/session", {
-          headers: { Authorization: `Bearer ${t}` },
-        });
-        const body = await res.json();
-        if (!alive) return;
-        if (!body.valid) {
-          writeToken(null);
-          setToken(null);
-        } else {
-          setToken(t);
-        }
-      } catch {
-        // keep token, let API calls fail if truly broken
-      } finally {
-        if (alive) setChecking(false);
-      }
+    const t = tokenFromUrl() || readStored();
+    if (!t) {
+      setChecking(false);
+      setError("Sem token de acesso. Acede via o link com ?token=…");
+      return;
     }
-    verify();
+    fetch(`/api/session?token=${encodeURIComponent(t)}`)
+      .then((r) => r.json())
+      .then((body) => {
+        if (!alive) return;
+        if (body.valid) {
+          writeStored(t);
+          setToken(t);
+        } else {
+          writeStored(null);
+          setToken(null);
+          setError("Token inválido.");
+        }
+      })
+      .catch(() => {
+        // Network hiccup — keep the token, let API calls retry.
+        if (alive) setToken(t);
+      })
+      .finally(() => {
+        if (alive) setChecking(false);
+      });
     return () => {
       alive = false;
     };
   }, []);
 
-  const login = useCallback(async (password) => {
-    setError(null);
-    try {
-      const res = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
-      });
-      if (!res.ok) {
-        setError("Password incorrecta");
-        return false;
-      }
-      const body = await res.json();
-      writeToken(body.token);
-      setToken(body.token);
-      return true;
-    } catch (e) {
-      setError("Erro de rede: " + e.message);
-      return false;
-    }
-  }, []);
-
   const logout = useCallback(() => {
-    writeToken(null);
+    writeStored(null);
     setToken(null);
   }, []);
 
@@ -92,5 +81,5 @@ export function useAuth() {
     [token]
   );
 
-  return { token, checking, error, login, logout, authedFetch };
+  return { token, checking, error, logout, authedFetch };
 }

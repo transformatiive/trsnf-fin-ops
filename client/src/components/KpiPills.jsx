@@ -10,7 +10,7 @@ function StatCard({ label, value, sub, accent, light, border }) {
         border: `1px solid ${border || C.border}`,
         borderRadius: 12,
         padding: "16px 20px",
-        flex: "1 1 160px",
+        flex: "1 1 150px",
         minWidth: 0,
       }}
     >
@@ -20,55 +20,56 @@ function StatCard({ label, value, sub, accent, light, border }) {
       <div style={{ fontSize: 22, fontWeight: 700, color: accent || C.text, letterSpacing: -0.5, lineHeight: 1 }}>
         {value}
       </div>
-      {sub && (
-        <div style={{ fontSize: 11, color: C.faint, marginTop: 4 }}>{sub}</div>
-      )}
+      {sub && <div style={{ fontSize: 11, color: C.faint, marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
 
-export default function KpiPills({ data, netResult }) {
+export default function KpiPills({ data, netResult, annualGoal = 250000 }) {
   if (!data) return null;
   const t = data.totals || {};
-  const totalForecast = (t.paid || 0) + (t.billed || 0) + (t.so_pending || 0) + (t.licence_pipeline || 0);
-  const ANNUAL_GOAL = 250000;
-  const pct = Math.min(100, Math.round((totalForecast / ANNUAL_GOAL) * 100));
+  const forecast = t.forecast_billing || 0;
+  const pct = Math.min(100, Math.round((forecast / annualGoal) * 100));
 
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
         <StatCard
-          label="Pago YTD"
-          value={fmt(t.paid)}
+          label="Faturado YTD"
+          value={fmt(t.invoiced)}
+          sub={`Recebido ${fmt(t.paid)}`}
           accent={C.greenText}
           light={C.greenLight}
           border={C.greenBorder}
         />
         <StatCard
-          label="Faturado / por pagar"
-          value={fmt(t.billed)}
+          label="A receber"
+          value={fmt(t.receivable)}
+          sub={t.receivable_overdue ? `${fmt(t.receivable_overdue)} em atraso` : "sem atrasos"}
           accent={C.blueText}
           light={C.blueLight}
           border={C.blueBorder}
         />
         <StatCard
-          label="Sales Orders por Faturar"
-          value={fmt(t.so_pending)}
+          label="Por faturar (SOs)"
+          value={fmt(t.to_invoice)}
+          sub={`Serv. ${fmt(t.to_invoice_services)} · Lic. ${fmt(t.to_invoice_licences)}`}
           accent={C.amberText}
           light={C.amberLight}
           border={C.amberBorder}
         />
         <StatCard
-          label="Licenças pipeline"
-          value={fmt(t.licence_pipeline)}
-          accent={C.amberText}
-          light={C.amberLight}
-          border={C.amberBorder}
+          label="Renovações Zoho"
+          value={fmt(t.licence_renewals)}
+          sub={t.recurring_forecast ? `Recorrentes ${fmt(t.recurring_forecast)}` : "próximos 365 dias"}
+          accent={C.orange}
+          light="#fff7ed"
+          border="#fed7aa"
         />
         <StatCard
           label="Previsão total"
-          value={fmt(totalForecast)}
-          sub={`${pct}% da meta anual`}
+          value={fmt(forecast)}
+          sub={`${pct}% da meta ${fmt(annualGoal)}`}
           accent={C.purple}
           light={C.purpleLight}
           border={C.purpleBorder}
@@ -76,6 +77,7 @@ export default function KpiPills({ data, netResult }) {
         <StatCard
           label="Resultado líquido est."
           value={fmt(netResult)}
+          sub="Faturação − custos"
           accent={netResult >= 0 ? C.greenText : C.redText}
           light={netResult >= 0 ? C.greenLight : C.redLight}
           border={netResult >= 0 ? C.greenBorder : C.redBorder}
@@ -94,7 +96,7 @@ export default function KpiPills({ data, netResult }) {
         />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.faint, marginTop: 4 }}>
-        <span>Progresso para meta anual €250.000</span>
+        <span>Progresso para meta anual {fmt(annualGoal)}</span>
         <span>{pct}%</span>
       </div>
     </div>

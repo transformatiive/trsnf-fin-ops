@@ -2,8 +2,8 @@ import React from "react";
 import { C } from "../utils/constants";
 
 const TABS = [
-  { key: "actions", label: "O que fazer" },
-  { key: "pl", label: "P&L Forecast" },
+  { key: "cashflow", label: "Tesouraria" },
+  { key: "backlog", label: "Por Faturar" },
   { key: "licences", label: "Licenças" },
 ];
 

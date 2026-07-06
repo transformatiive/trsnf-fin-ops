@@ -62,24 +62,32 @@ POST /api/vault/reload     (auth required)
 ```
 CREDENTIAL_VAULT_URL    # override vault base URL
 CREDENTIAL_VAULT_EPIC   # override epic key (default TRNSF-INTERNAL)
-APP_PASSWORD            # override the login password baked in
+ACCESS_TOKEN            # override the URL access token baked in
 PORT                    # defaults to 3000
 ```
 
 ## Authentication
 
-A single password gate protects all `/api/*` routes (except `/api/login`,
-`/api/session`). Password: `!TransformatiiveAdmin2026#` (override by setting
-`APP_PASSWORD` in Replit Secrets).
+Access is granted by a **token in the URL** — no login page. Open the dashboard
+with `?token=…` and the token is captured, persisted (localStorage) and sent as a
+`Bearer` header on every API call. All `/api/*` routes require it (except
+`/api/session`, which just reports whether a token is valid).
 
-Sessions last 12h and are signed HMAC tokens kept in `sessionStorage`.
+Default token: `trnsf-fin-2026-a7f3c9e14b` (override with `ACCESS_TOKEN` in Replit
+Secrets). Access URL:
+
+```
+https://<app>/?token=trnsf-fin-2026-a7f3c9e14b
+```
+
+> A URL token is convenient but less private than a password (it can end up in
+> browser history / referer headers). Rotate it via `ACCESS_TOKEN` when needed.
 
 ## API
 
-- `POST /api/login` `{ password }` → `{ token }`
-- `GET  /api/session` → `{ valid }`
-- `GET  /api/dashboard[?refresh=1]` → full financial payload (5-min cache)
-- `GET  /api/analysis?tab=actions|pl` → SSE stream of Claude Sonnet analysis
+- `GET  /api/session?token=…` → `{ valid }`
+- `GET  /api/dashboard[?year=YYYY][&refresh=1]` → full financial payload (5-min cache per year)
+- `GET  /api/analysis?tab=actions|pl` → SSE stream of Claude analysis
 - `GET  /api/health` → credential health check
 
 ## Project structure
@@ -109,12 +117,31 @@ client/
     └── utils/             Formatters, colour tokens, AI markdown renderer
 ```
 
+## Financial model (no double counting)
+
+The dashboard separates concepts instead of summing overlapping ones. Revenue
+components are **non-overlapping by construction**:
+
+- **Faturação real** (`invoiced`) — all issued Books invoices, by invoice date.
+- **Por faturar** (`to_invoice`) — remaining balance of open SOs, split
+  **serviços vs licenças** from line items (`config.licence_keywords`).
+- **Renovações Zoho** (`licence_renewals`) — Partner Store renewals in the next
+  365 days, **excluding** any already captured as a Books SO.
+- **Recorrentes previstos** (`recurring_forecast`) — contracted monthly clients,
+  only for future months **not yet invoiced** (avoids double counting with
+  `invoiced`).
+
+`totals.forecast_billing = invoiced + to_invoice + licence_renewals + recurring_forecast`.
+
+**Expenses are real.** `expenses.actual_by_month` pulls Books **bills + expenses**
+by month/category. Past/current months use real spend; future months fall back to
+the editable recurring budget (`config.fixed_costs`). Net = faturação − custos.
+
 ## Key design notes
 
-- **COGS framing.** Zoho licence costs are 100% pass-through with a guaranteed
-  18% margin. COGS in the P&L represents timing risk (paying Zoho before
-  receiving from client), NOT a margin problem. Novembro is the big one:
-  Leasys PT ~€57k outflow before ~€67k inflow.
+- **Licence margin.** Zoho licences are 100% pass-through with a guaranteed 18%
+  margin (`zoho_licence_margin`). The risk is cashflow timing (paying Zoho before
+  the client pays), not margin. Novembro is the big one: Leasys PT.
 - **Moloni grant endpoint uses GET**, not POST — critical gotcha.
 - **Zoho Books tokens cached in memory** and refreshed automatically on 401.
-- **Backend caches `/api/dashboard` for 5 minutes**; pass `?refresh=1` to bust.
+- **Backend caches `/api/dashboard` for 5 minutes per year**; `?refresh=1` busts.

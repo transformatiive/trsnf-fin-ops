@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export function useDashboard(authedFetch, enabled) {
+export function useDashboard(authedFetch, enabled, year) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -12,8 +12,11 @@ export function useDashboard(authedFetch, enabled) {
       setLoading(true);
       setError(null);
       try {
-        const url = "/api/dashboard" + (force ? "?refresh=1" : "");
-        const res = await authedFetch(url);
+        const params = new URLSearchParams();
+        if (year) params.set("year", String(year));
+        if (force) params.set("refresh", "1");
+        const qs = params.toString();
+        const res = await authedFetch("/api/dashboard" + (qs ? `?${qs}` : ""));
         if (!res.ok) {
           const body = await res.text();
           throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
@@ -27,7 +30,7 @@ export function useDashboard(authedFetch, enabled) {
         setLoading(false);
       }
     },
-    [authedFetch, enabled]
+    [authedFetch, enabled, year]
   );
 
   useEffect(() => {

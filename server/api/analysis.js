@@ -10,12 +10,13 @@ function fmtEur(n) {
 
 function buildContext(data) {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const t = data.totals || {};
 
   const overdueItems = [];
   let largestOverdueClient = "—";
   let largestOverdueAmount = 0;
   for (const m of months) {
-    for (const it of data.billed?.[m]?.items || []) {
+    for (const it of data.receivable?.by_due_month?.[m]?.items || []) {
       if (it.is_overdue) {
         overdueItems.push(`${it.client} ${fmtEur(it.amount)}`);
         if (it.amount > largestOverdueAmount) {
@@ -26,23 +27,28 @@ function buildContext(data) {
     }
   }
 
-  const upcomingRenewals = (data.licence_pipeline?.annual_licences || [])
+  const upcomingRenewals = (data.licence_renewals?.items || [])
+    .filter((l) => !l.already_in_books)
     .sort((a, b) => new Date(a.renewal_date) - new Date(b.renewal_date))
     .slice(0, 6)
     .map((l) => `${l.client} ${fmtEur(l.amount)} (${l.month})`);
 
   const monthlyActuals = months
     .slice(0, new Date().getMonth() + 1)
-    .map((m) => `${m} ${fmtEur(data.paid?.[m]?.total || 0)}`)
+    .map((m) => `${m} ${fmtEur(data.invoiced?.[m]?.total || 0)}`)
     .join(", ");
 
   const planYtd = 20833 * (new Date().getMonth() + 1);
-  const variance = (data.ytd_paid || 0) - planYtd;
+  const variance = (t.invoiced || 0) - planYtd;
 
   return {
-    paid_total: fmtEur(data.ytd_paid || 0),
-    billed_total: fmtEur(data.totals?.billed || 0),
-    so_total: fmtEur(data.totals?.so_pending || 0),
+    paid_total: fmtEur(t.paid || 0),
+    invoiced_total: fmtEur(t.invoiced || 0),
+    receivable_total: fmtEur(t.receivable || 0),
+    receivable_overdue: fmtEur(t.receivable_overdue || 0),
+    so_total: fmtEur(t.to_invoice || 0),
+    so_services: fmtEur(t.to_invoice_services || 0),
+    so_licences: fmtEur(t.to_invoice_licences || 0),
     largest_overdue_client: largestOverdueClient,
     largest_overdue_amount: fmtEur(largestOverdueAmount),
     upcoming_renewals: upcomingRenewals.join(", ") || "nenhuma próxima",
@@ -50,14 +56,8 @@ function buildContext(data) {
     plan_ytd: fmtEur(planYtd),
     variance: fmtEur(variance),
     monthly_actuals: monthlyActuals,
-    fixed_total: fmtEur(3071),
-    fixed_base: fmtEur(1957),
-    forecast_total: fmtEur(
-      (data.totals?.paid || 0) +
-        (data.totals?.billed || 0) +
-        (data.totals?.so_pending || 0) +
-        (data.totals?.licence_pipeline || 0)
-    ),
+    expenses_total: fmtEur(t.expenses_actual || 0),
+    forecast_total: fmtEur(t.forecast_billing || 0),
   };
 }
 
@@ -65,11 +65,11 @@ function buildActionsPrompt(ctx, date) {
   return `És um assistente financeiro a falar directamente com o Nuno Barreto, fundador da Transformatiive Lda, uma consultora Zoho portuguesa. Hoje é ${date}. Meta anual: €250.000.
 
 SITUAÇÃO FINANCEIRA ACTUAL:
-- Recebido YTD: ${ctx.paid_total}
-- Faturado / por receber: ${ctx.billed_total} (maior: ${ctx.largest_overdue_client} ${ctx.largest_overdue_amount} em atraso)
-- SOs abertas por faturar: ${ctx.so_total}
+- Faturado YTD: ${ctx.invoiced_total} · Recebido: ${ctx.paid_total}
+- A receber (contas por cobrar): ${ctx.receivable_total} (em atraso: ${ctx.receivable_overdue}; maior: ${ctx.largest_overdue_client} ${ctx.largest_overdue_amount})
+- SOs abertas por faturar: ${ctx.so_total} (serviços ${ctx.so_services} · licenças ${ctx.so_licences})
 - Recorrentes mensais: HiFly €522, Unicenter €447, Yourbranding €87, ART €100
-- Renovações grandes: ${ctx.upcoming_renewals}
+- Renovações Zoho grandes: ${ctx.upcoming_renewals}
 - Cobranças em atraso: ${ctx.overdue_items}
 
 CONTEXTO: As licenças Zoho são sempre refaturadas com 18% de margem garantida — não são um risco de margem. O risco é de timing de cashflow (paga ao Zoho antes de receber do cliente). Não mencionar licenças como problema de margem.
@@ -81,9 +81,9 @@ function buildPLPrompt(ctx, date) {
   return `És um assistente financeiro a falar directamente com o Nuno Barreto, fundador da Transformatiive Lda. Hoje é ${date}. Meta anual: €250.000.
 
 RESUMO P&L:
-- Recebido YTD: ${ctx.paid_total} vs plano ${ctx.plan_ytd} — variância: ${ctx.variance}
-- Actuals por mês: ${ctx.monthly_actuals}
-- Custos fixos/mês: ${ctx.fixed_total} (salário €1.114 + overhead ${ctx.fixed_base})
+- Faturado YTD: ${ctx.invoiced_total} vs plano ${ctx.plan_ytd} — variância: ${ctx.variance}
+- Faturação por mês: ${ctx.monthly_actuals}
+- Despesa real YTD (Books): ${ctx.expenses_total}
 - Picos de saídas: IVA Q1 em Maio, IRC €5.300 em Maio, auto €8.000 em Junho
 - Novembro: Leasys PT €67.449 receita, custo reseller ~€57k — cashflow exige ter esse capital antes de receber, mas margem de 18% é garantida
 - Previsão receita total: ~${ctx.forecast_total}
