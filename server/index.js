@@ -103,6 +103,9 @@ async function start() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[server] listening on http://0.0.0.0:${PORT}`);
     console.log(`[server] auth: URL token gate enabled (?token=…)`);
+    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+      console.log(`[server] public domain: https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
+    }
   });
 }
 
