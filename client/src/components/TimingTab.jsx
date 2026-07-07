@@ -28,6 +28,13 @@ function SummaryCard({ label, out, income, accent, light, border }) {
 export default function TimingTab({ data }) {
   const cal = data.licence_renewals?.calendar || [];
 
+  const noSo = useMemo(
+    () => cal.filter((r) => !r.is_own && !r.already_in_books && !r.is_recurring && r.client_in > 0),
+    [cal]
+  );
+  const noSoTotal = noSo.reduce((a, r) => a + r.client_in, 0);
+  const noSoZoho = noSo.reduce((a, r) => a + r.zoho_out, 0);
+
   const windows = useMemo(() => {
     const w = { 30: { out: 0, in: 0 }, 60: { out: 0, in: 0 }, 90: { out: 0, in: 0 }, 365: { out: 0, in: 0 } };
     for (const r of cal) {
@@ -52,6 +59,17 @@ export default function TimingTab({ data }) {
       <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
         <strong style={{ color: C.text }}>Timing Zoho</strong> — quando tens de <strong>pagar ao Zoho</strong> (COGS das licenças) vs. o que <strong>recebes do cliente</strong>. O risco de tesouraria é pagares antes de receberes.
       </div>
+
+      {noSo.length > 0 && (
+        <div style={{ marginBottom: 16, padding: "12px 14px", background: C.amberLight, border: `1px solid ${C.amberBorder}`, borderRadius: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.amberText }}>
+            ⚠️ {noSo.length} renovações Zoho sem SO — {fmt(noSoTotal)} a faturar
+          </div>
+          <div style={{ fontSize: 12, color: C.amberText, marginTop: 3, lineHeight: 1.5 }}>
+            Vais pagar <strong>{fmt(noSoZoho)}</strong> ao Zoho nestas renovações. <strong>Gera os SOs</strong> e fatura o cliente <strong>antes</strong> da data de pagamento — senão pagas ao Zoho sem teres recebido. Vê a coluna "Estado = A faturar" abaixo.
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
         <SummaryCard label="Próximos 30 dias" out={windows[30].out} income={windows[30].in} accent={C.red} light={C.redLight} border={C.redBorder} />
