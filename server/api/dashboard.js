@@ -520,8 +520,9 @@ async function buildForecastDeals(year) {
     const rawStage = dl.Stage || "—";
     stagesSeen[rawStage] = (stagesSeen[rawStage] || 0) + 1;
     const stage = (dl.Stage || "").toLowerCase();
-    if (/closed|won|lost|ganho|perdido/.test(stage)) continue; // Won→SO, Lost fora
-    if (stages.length && !stages.some((s) => stage.includes(s))) continue;
+    // Todos os deals em aberto (não adjudicados). Só excluímos os fechados:
+    // Ganho fechado → vira SO; Perda fechada → fora.
+    if (/closed|won|lost|ganho\s*fechado|perda\s*fechada|perdido/.test(stage)) continue;
     const amount = Number(dl.Amount || 0);
     if (!(amount > 0)) continue;
 
@@ -626,7 +627,14 @@ async function buildDashboard(year) {
     totals,
   };
 
-  cacheByYear.set(year, { data, expires: Date.now() + CACHE_TTL });
+  // Não cachear um resultado que parece uma falha total de upstream (Zoho em
+  // baixo devolveu tudo vazio) — senão o vazio fica preso 5 min. Nesse caso
+  // devolve os dados mas com cache curta para a próxima chamada voltar a tentar.
+  const looksEmpty =
+    totals.invoiced === 0 && expenses.expenses_count === 0 &&
+    to_invoice.total === 0 && sumTotals(paid) === 0;
+  const ttl = looksEmpty ? 15 * 1000 : CACHE_TTL;
+  cacheByYear.set(year, { data, expires: Date.now() + ttl });
   return data;
 }
 

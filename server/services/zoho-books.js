@@ -21,27 +21,39 @@ async function getToken() {
   return getZohoToken("books", c.accountsUrl, c.clientId, c.clientSecret, c.refreshToken);
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function booksGet(path, params = {}) {
   const c = cfg();
-  const token = await getToken();
-  try {
-    const res = await axios.get(`${c.base}${path}`, {
-      params: { organization_id: c.orgId, ...params },
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-    });
-    return res.data;
-  } catch (err) {
-    if (err.response && err.response.status === 401) {
-      invalidateZohoToken("books");
-      const token2 = await getToken();
+  let lastErr;
+  // Até 3 tentativas: 401 → refresh token; transitórios (429/5xx/rede/timeout)
+  // → backoff. Evita que uma falha momentânea do Zoho devolva dados vazios
+  // (que depois ficariam em cache 5 min).
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const token = await getToken();
       const res = await axios.get(`${c.base}${path}`, {
         params: { organization_id: c.orgId, ...params },
-        headers: { Authorization: `Zoho-oauthtoken ${token2}` },
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        timeout: 20000,
       });
       return res.data;
+    } catch (err) {
+      lastErr = err;
+      const status = err.response && err.response.status;
+      if (status === 401) {
+        invalidateZohoToken("books");
+        continue; // novo token na próxima tentativa
+      }
+      const transient = !status || status === 429 || status >= 500 || err.code === "ECONNABORTED" || err.code === "ETIMEDOUT";
+      if (transient && attempt < 2) {
+        await sleep(500 * (attempt + 1));
+        continue;
+      }
+      throw err;
     }
-    throw err;
   }
+  throw lastErr;
 }
 
 async function fetchInvoices(status, year) {

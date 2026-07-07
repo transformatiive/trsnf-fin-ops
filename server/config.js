@@ -67,8 +67,10 @@ module.exports = {
   direct_pay_rules: [
     { client: "lakhani" },                        // Lakhani Group — paga direto
     { client: "fluxograma" },                     // Fluxograma — paga direto
-    { client: "automated retail", service: "one" }, // ART: só revendemos o FSM, não o One
+    { client: "automated retail", service: "one" }, // ART: só revendemos o FSM
     { client: "automated rt", service: "one" },
+    { client: "automated retail", service: "voice" }, // ART Voice — a cancelar
+    { client: "automated rt", service: "voice" },
   ],
 
   // Despesa: categorias do Books tratadas como COGS de licenças (pass-through
