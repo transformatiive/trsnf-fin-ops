@@ -1,5 +1,6 @@
 const books = require("../services/zoho-books");
 const partner = require("../services/zoho-partner");
+const crm = require("../services/zoho-crm");
 const forex = require("../services/forex");
 const config = require("../config");
 
@@ -487,6 +488,54 @@ function buildLicenceCogsForecast(licence_renewals, to_invoice, recurring_foreca
   return { by_month: byMonth, total: Math.round(MONTHS.reduce((a, m) => a + byMonth[m], 0)) };
 }
 
+// ─── DEALS PREVISTOS (CRM, Negociação/Revisão — ainda não adjudicados) ───────
+async function buildForecastDeals(year) {
+  const deals = await crm.fetchOpenDeals().catch(() => []);
+  const stages = config.deal_forecast_stages || [];
+  const byMonth = emptyByMonth();
+  const items = [];
+  let scope_ok = true;
+
+  for (const dl of deals) {
+    const stage = (dl.Stage || "").toLowerCase();
+    if (/closed|won|lost|ganho|perdido/.test(stage)) continue; // Won→SO, Lost fora
+    if (stages.length && !stages.some((s) => stage.includes(s))) continue;
+    const amount = Number(dl.Amount || 0);
+    if (!(amount > 0)) continue;
+
+    const closing = dl.Closing_Date || null;
+    const mk = monthKey(closing);
+    const yr = closing ? new Date(closing).getFullYear() : null;
+    const client =
+      (dl.Account_Name && (dl.Account_Name.name || dl.Account_Name)) || dl.Deal_Name || "—";
+
+    const item = {
+      name: dl.Deal_Name,
+      client,
+      amount,
+      stage: dl.Stage,
+      probability: dl.Probability != null ? Number(dl.Probability) : null,
+      closing_date: closing,
+      month: mk,
+      year: yr,
+    };
+    items.push(item);
+    if (mk && yr === year) {
+      byMonth[mk].total += amount;
+      byMonth[mk].items.push(item);
+    }
+  }
+
+  return {
+    by_month: byMonth,
+    items: items.sort((a, b) => new Date(a.closing_date || 0) - new Date(b.closing_date || 0)),
+    total: sumTotals(byMonth),
+    total_all: Math.round(items.reduce((a, d) => a + d.amount, 0)),
+    count: items.length,
+    scope_ok,
+  };
+}
+
 // ─── ORCHESTRATION ───────────────────────────────────────────────────────────
 async function buildDashboard(year) {
   year = Number(year) || config.fiscal_year;
@@ -497,11 +546,12 @@ async function buildDashboard(year) {
   const soList = await books.fetchSalesOrders("open").catch(() => []);
   const booksSoCustomers = new Set(soList.map((so) => so.customer_name).filter(Boolean));
 
-  const [{ invoiced, paid, receivable }, to_invoice, licence_renewals, expenses] = await Promise.all([
+  const [{ invoiced, paid, receivable }, to_invoice, licence_renewals, expenses, forecast_deals] = await Promise.all([
     buildInvoiced(year),
     buildToInvoice(year),
     buildLicenceRenewals(booksSoCustomers, year),
     buildExpenses(year),
+    buildForecastDeals(year),
   ]);
 
   const recurring_forecast = buildRecurringForecast(invoiced, year);
@@ -522,6 +572,8 @@ async function buildDashboard(year) {
     expenses_cogs: expenses.cogs_total,
     expenses_opex: expenses.opex_total,
     licence_cogs_forecast: licence_cogs_forecast.total,
+    forecast_deals: forecast_deals.total,
+    forecast_deals_count: forecast_deals.count,
   };
   // Faturação total prevista (sem sobreposição): já faturado + SOs adjudicados +
   // renovações Zoho ainda sem SO + recorrentes previstos para meses futuros.
@@ -545,6 +597,7 @@ async function buildDashboard(year) {
     licence_renewals,
     recurring_forecast,
     licence_cogs_forecast,
+    forecast_deals,
     expenses,
     totals,
   };

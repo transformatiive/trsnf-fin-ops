@@ -36,6 +36,10 @@ module.exports = {
 
   zoho_licence_margin: 1.18,
 
+  // Deals do CRM a mostrar como "previstos não adjudicados" (pipeline). Won/Lost
+  // ficam de fora (Won vira SO). Match por texto do estado (case-insensitive).
+  deal_forecast_stages: ["negocia", "revis", "negotiation", "review"],
+
   // Classificação de linhas de SO/fatura em LICENÇA vs SERVIÇO.
   // Regra: se a linha bate numa service_keyword → SERVIÇO (mesmo que mencione um
   // produto Zoho, ex.: "Implementação CRM"); senão, se bate numa licence_keyword

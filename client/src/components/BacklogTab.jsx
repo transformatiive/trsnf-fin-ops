@@ -181,14 +181,48 @@ function RenewalsSection({ data }) {
   );
 }
 
-function ForecastDealsPlaceholder() {
+function ForecastDealsSection({ data }) {
+  const fd = data.forecast_deals || {};
+  const items = fd.items || [];
   return (
-    <div style={{ background: C.surfaceAlt, border: `1px dashed ${C.borderStrong}`, borderRadius: 10, padding: 16, marginBottom: 20 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Deals previstos (ainda não adjudicados)</div>
-      <div style={{ fontSize: 12, color: C.muted, marginTop: 4, lineHeight: 1.6 }}>
-        Secção reservada para oportunidades em pipeline <strong>ainda não adjudicadas</strong> (fora dos SOs, que são faturação já adjudicada).
-        A definir contigo — entrada manual ou fonte a decidir; sem ligação ao CRM.
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, marginBottom: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Deals previstos — Negociação/Revisão ({items.length})</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.purple }}>{fmt(fd.total_all || 0)}</div>
       </div>
+      <div style={{ fontSize: 11, color: C.faint, marginTop: 3, marginBottom: 10 }}>
+        Pipeline do Zoho CRM ainda não adjudicado. Quando um deal é ganho, passa a SO (Por Faturar).
+      </div>
+      {items.length === 0 ? (
+        <div style={{ fontSize: 12, color: C.muted, padding: "8px 0" }}>
+          Sem deals em Negociação/Revisão (ou o token Zoho ainda não tem scope de CRM — nesse caso adiciona <code>ZohoCRM.modules.deals.READ</code> ao OAuth).
+        </div>
+      ) : (
+        <div className="table-scroll">
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 520 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                {["Deal / Cliente", "Fecho previsto", "Prob.", "Valor"].map((h, i) => (
+                  <th key={h} style={{ textAlign: i >= 2 ? "right" : "left", padding: "7px 10px", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((d, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "7px 10px", color: C.text }}>
+                    {d.client}{d.name && d.name !== d.client ? <span style={{ color: C.faint }}> · {d.name}</span> : null}
+                    <span style={{ marginLeft: 6, fontSize: 10, color: C.purple }}>{d.stage}</span>
+                  </td>
+                  <td style={{ padding: "7px 10px", color: C.muted, whiteSpace: "nowrap" }}>{d.closing_date || "—"}</td>
+                  <td style={{ padding: "7px 10px", textAlign: "right", color: C.muted, whiteSpace: "nowrap" }}>{d.probability != null ? d.probability + "%" : "—"}</td>
+                  <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(d.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -204,7 +238,7 @@ export default function BacklogTab({ data }) {
       <div style={{ fontSize: 13, fontWeight: 600, color: C.text, margin: "4px 0 12px" }}>Renovações Zoho (Partner Store)</div>
       <RenewalsSection data={data} />
       <div style={{ marginTop: 20 }}>
-        <ForecastDealsPlaceholder />
+        <ForecastDealsSection data={data} />
       </div>
     </div>
   );
