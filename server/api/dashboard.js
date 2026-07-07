@@ -520,9 +520,9 @@ async function buildForecastDeals(year) {
     const rawStage = dl.Stage || "—";
     stagesSeen[rawStage] = (stagesSeen[rawStage] || 0) + 1;
     const stage = (dl.Stage || "").toLowerCase();
-    // Todos os deals em aberto (não adjudicados). Só excluímos os fechados:
-    // Ganho fechado → vira SO; Perda fechada → fora.
-    if (/closed|won|lost|ganho\s*fechado|perda\s*fechada|perdido/.test(stage)) continue;
+    if (/closed|won|lost|ganho|perdido|perda/.test(stage)) continue; // fechados fora
+    // Apenas os estágios pedidos (Negociação/Revisão). Won vira SO.
+    if (stages.length && !stages.some((s) => stage.includes(s))) continue;
     const amount = Number(dl.Amount || 0);
     if (!(amount > 0)) continue;
 
