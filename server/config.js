@@ -57,6 +57,16 @@ module.exports = {
   // receita de renovações; são custo interno.
   own_entity_patterns: ["transformatiive"],
 
+  // Pagamento direto: subscrições em que o CLIENTE paga o Zoho diretamente (não
+  // são revenda nossa). Excluídas do COGS, da receita e do alerta de "gerar SO".
+  // Podem ser por cliente (todas as subs) ou por cliente+serviço.
+  direct_pay_rules: [
+    { client: "lakhani" },                        // Lakhani Group — paga direto
+    { client: "fluxograma" },                     // Fluxograma — paga direto
+    { client: "automated retail", service: "one" }, // ART: só revendemos o FSM, não o One
+    { client: "automated rt", service: "one" },
+  ],
+
   // Despesa: categorias do Books tratadas como COGS de licenças (pass-through
   // Zoho), separadas do overhead operacional.
   cogs_expense_categories: ["Licenças Zoho", "Custo de produtos vendidos"],

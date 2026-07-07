@@ -45,6 +45,17 @@ function isOwnEntity(name) {
   return (config.own_entity_patterns || []).some((p) => n.includes(p));
 }
 
+// Subscrição em que o cliente paga o Zoho diretamente (não é revenda nossa).
+function isDirectPay(clientName, serviceName) {
+  const c = (clientName || "").toLowerCase();
+  const s = (serviceName || "").toLowerCase();
+  return (config.direct_pay_rules || []).some((r) => {
+    if (r.client && !c.includes(r.client.toLowerCase())) return false;
+    if (r.service && !s.includes(r.service.toLowerCase())) return false;
+    return true;
+  });
+}
+
 const MONTHLY_CLIENT_MATCHERS = {
   hifly: (n) => n.includes("hi fly") || n.includes("hifly"),
   unicenter: (n) => n.includes("unicenter"),
@@ -274,7 +285,12 @@ async function buildLicenceRenewals(booksSoCustomers, year) {
 
       const isOwn = isOwnEntity(clientName);
       const isRecurring = matchesMonthlyClient(clientName);
+      const isDirect = isDirectPay(clientName, service);
       const alreadyInBooks = soNorm.has(normName(clientName));
+
+      // Pagamento direto: o cliente paga o Zoho — não é cashflow nosso. Fora do
+      // calendário, do COGS e do alerta de gerar SO.
+      if (isDirect) continue;
 
       // Calendário de tesouraria Zoho (próximos 365 dias, independente do ano
       // fiscal): quando pagas ao Zoho vs quanto recebes do cliente.

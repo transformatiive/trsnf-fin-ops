@@ -21,6 +21,30 @@ export function oneOffForMonth(m, budget) {
   return (budget.one_off?.[m] || []).reduce((a, x) => a + Number(x.amount || 0), 0);
 }
 
+// Custos SEM IVA dedutível (não entram na base de dedução do IVA): financiamento
+// (juros isentos), leasing financeiro, seguros (isentos), salários, impostos,
+// encargos bancários. Renting operacional e eletricidade TÊM IVA (não excluídos).
+const IVA_NONDEDUCTIBLE = [
+  "credibom", "financiamento", "prestaç", "leasing", "seguro", "generali",
+  "imposto", "salár", "banco", "juros",
+];
+function isVatable(name) {
+  const n = (name || "").toLowerCase();
+  return !IVA_NONDEDUCTIBLE.some((k) => n.includes(k));
+}
+
+// Opex com IVA dedutível no mês (exclui salário e rubricas sem IVA).
+export function vatableOpexForMonth(m, budget) {
+  const costs = Array.isArray(budget.fixed_costs)
+    ? budget.fixed_costs
+    : Object.entries(budget.fixed_costs).map(([name, amount]) => ({ name, amount, frequency: "monthly", start_month: "Jan" }));
+  return costs.reduce((a, c) => {
+    if (!isVatable(c.name)) return a;
+    const months = getOccurrenceMonths(c.frequency || "monthly", c.start_month || "Jan");
+    return a + (months.includes(m) ? Number(c.amount) : 0);
+  }, 0);
+}
+
 // Central per-month model. Revenue components are non-overlapping by construction
 // (see server/api/dashboard.js): invoiced = faturação real; backlog = SOs por
 // faturar; renewals = renovações Zoho sem SO; recurring = recorrentes previstos
@@ -58,6 +82,8 @@ export function deriveMonthly(data, budget) {
 
     const net = revenue - expense;
     const grossMargin = revenue - cogs; // margem antes de overhead
+    // Base de IVA: opex com IVA (futuro exclui financiamento/seguros; passado usa real).
+    const vatableOpex = isPast ? opex : vatableOpexForMonth(m, budget);
 
     return {
       month: m, i, isPast,
@@ -65,7 +91,7 @@ export function deriveMonthly(data, budget) {
       backlog, backlogSvc, backlogLic, renewals, recurring,
       revenueActual, revenueForecast, revenue,
       cogsActual, opexActual, cogsForecast, opexBudget,
-      opex, cogs, iva: 0, expense, net, grossMargin,
+      opex, cogs, vatableOpex, iva: 0, expense, net, grossMargin,
     };
   });
 
@@ -81,8 +107,15 @@ export function deriveMonthly(data, budget) {
   ];
   for (const q of quarters) {
     if (q.pay <= curIdx) continue; // pagamento já passado → real no opex
-    const base = q.months.reduce((a, i) => a + (rows[i].revenue - rows[i].cogs - rows[i].opex), 0);
-    const iva = Math.max(0, Math.round(ivaRate * base));
+    // Base ≈ valor acrescentado: faturação − COGS − opex COM IVA (exclui
+    // financiamento/seguros/salário, que não têm IVA dedutível).
+    const base = q.months.reduce((a, i) => a + (rows[i].revenue - rows[i].cogs - rows[i].vatableOpex), 0);
+    // Ajustes manuais de IVA (deduções pontuais, ex.: compra de capital) no trimestre.
+    const adj = q.months.reduce(
+      (a, i) => a + (budget.iva_adjustments?.[MONTHS[i]] || []).reduce((s, x) => s + Number(x.amount || 0), 0),
+      0
+    );
+    const iva = Math.max(0, Math.round(ivaRate * base - adj));
     const r = rows[q.pay];
     r.iva = iva;
     r.expense += iva;

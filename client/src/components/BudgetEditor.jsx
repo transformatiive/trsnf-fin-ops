@@ -202,6 +202,34 @@ export default function BudgetEditor({ budget, onSave, onClose }) {
     });
   }
 
+  // Ajustes de IVA (deduções pontuais, ex.: compra de capital / viatura elétrica)
+  function setIvaAdj(month, index, field, value) {
+    setDraft((d) => {
+      const adj = { ...(d.iva_adjustments || {}) };
+      const items = [...(adj[month] || [])];
+      items[index] = { ...items[index], [field]: field === "amount" ? Number(value) : value };
+      adj[month] = items;
+      return { ...d, iva_adjustments: adj };
+    });
+  }
+  function addIvaAdj(month) {
+    setDraft((d) => {
+      const adj = { ...(d.iva_adjustments || {}) };
+      adj[month] = [...(adj[month] || []), { label: "Dedução IVA", amount: 0 }];
+      return { ...d, iva_adjustments: adj };
+    });
+  }
+  function removeIvaAdj(month, index) {
+    setDraft((d) => {
+      const adj = { ...(d.iva_adjustments || {}) };
+      const items = [...(adj[month] || [])];
+      items.splice(index, 1);
+      if (items.length === 0) delete adj[month];
+      else adj[month] = items;
+      return { ...d, iva_adjustments: adj };
+    });
+  }
+
   const annualFixed = draft.fixed_costs.reduce((a, c) => a + c.amount * annualOccurrences(c.frequency || "monthly"), 0);
   const avgMonthly = Math.round(annualFixed / 12);
 
@@ -307,6 +335,40 @@ export default function BudgetEditor({ budget, onSave, onClose }) {
               </div>
             );
           })}
+
+          <SectionTitle>Ajustes de IVA (deduções pontuais)</SectionTitle>
+          <div style={{ fontSize: 11, color: C.faint, marginBottom: 10, lineHeight: 1.5 }}>
+            Deduções de IVA únicas no mês em que ocorrem (ex.: compra de viatura elétrica, equipamento). Reduzem o IVA estimado do trimestre. Valor = montante de IVA dedutível.
+          </div>
+          {MONTHS.map((m, i) => {
+            const items = (draft.iva_adjustments || {})[m] || [];
+            if (!items.length) return null;
+            return (
+              <div key={m} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: C.faint, marginBottom: 4 }}>{MONTHS_PT[i]}</div>
+                {items.map((item, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                    <input type="text" value={item.label} onChange={(e) => setIvaAdj(m, idx, "label", e.target.value)}
+                      style={{ flex: 1, border: `1px solid ${C.border}`, borderRadius: 7, padding: "6px 8px", fontSize: 12, color: C.text, background: C.bg, outline: "none" }} />
+                    <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.border}`, borderRadius: 7, background: C.bg, overflow: "hidden" }}>
+                      <span style={{ padding: "0 6px", fontSize: 12, color: C.faint, borderRight: `1px solid ${C.border}`, lineHeight: "32px" }}>€</span>
+                      <input type="number" value={item.amount} min={0} onChange={(e) => setIvaAdj(m, idx, "amount", e.target.value)}
+                        style={{ width: 72, border: "none", background: "transparent", padding: "6px 8px", fontSize: 12, color: C.text, outline: "none" }} />
+                    </div>
+                    <button onClick={() => removeIvaAdj(m, idx)} style={{ padding: "5px 8px", border: `1px solid ${C.border}`, borderRadius: 7, background: "transparent", color: C.red, fontSize: 13, cursor: "pointer" }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          <select
+            value=""
+            onChange={(e) => { if (e.target.value) addIvaAdj(e.target.value); }}
+            style={{ width: "100%", border: `1px dashed ${C.border}`, borderRadius: 8, padding: "9px", fontSize: 12, color: C.muted, background: "transparent", cursor: "pointer", marginTop: 4 }}
+          >
+            <option value="">+ Adicionar dedução de IVA num mês…</option>
+            {MONTHS.map((m, i) => <option key={m} value={m}>{MONTHS_PT[i]}</option>)}
+          </select>
         </div>
 
         {/* Footer */}
