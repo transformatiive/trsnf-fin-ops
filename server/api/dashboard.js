@@ -423,8 +423,18 @@ async function buildExpenses(year) {
   const cogsByMonth = emptyByMonth({ by_category: {} }); // COGS licenças
   const opexByMonth = emptyByMonth({ by_category: {} }); // overhead operacional
 
+  // Dedup por referência bancária (SEPA) + valor: o mesmo pagamento por vezes é
+  // lançado 2× no Books em categorias diferentes (ex.: Tesla como "viatura" e
+  // "combustível"). Mesma ref + mesmo valor → conta uma única vez.
+  const seenRef = new Set();
   const add = (mk, amount, category, label, source) => {
     if (!mk || !(amount > 0)) return;
+    const refMatch = (label || "").match(/\b(\d{7,})\b/);
+    if (refMatch) {
+      const key = refMatch[1] + "|" + Math.round(amount);
+      if (seenRef.has(key)) return; // duplicado
+      seenRef.add(key);
+    }
     const bucket = isCogsExpense(category, label) ? cogsByMonth : opexByMonth;
     for (const target of [byMonth, bucket]) {
       target[mk].total += amount;
