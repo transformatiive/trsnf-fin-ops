@@ -248,6 +248,7 @@ async function buildLicenceRenewals(booksSoCustomers, year) {
   let alreadyInBooksTotal = 0;
   let ownTotal = 0;                // subscrições próprias (custo interno, não receita)
   let recurringOverlapTotal = 0;   // já cobertas por recurring_forecast
+  let unnamedTotal = 0;            // renovações sem nome de cliente (dados a corrigir)
 
   const soNorm = new Set([...(booksSoCustomers || [])].map(normName));
 
@@ -287,11 +288,15 @@ async function buildLicenceRenewals(booksSoCustomers, year) {
       const isOwn = isOwnEntity(clientName);
       const isRecurring = matchesMonthlyClient(clientName);
       const isDirect = isDirectPay(clientName, service);
+      const isUnnamed = ["none", "—", "-", ""].includes(String(clientName).toLowerCase().trim());
       const alreadyInBooks = soNorm.has(normName(clientName));
 
       // Pagamento direto: o cliente paga o Zoho — não é cashflow nosso. Fora do
       // calendário, do COGS e do alerta de gerar SO.
       if (isDirect) continue;
+      // Sem nome de cliente no Partner Store — não conta como receita (a corrigir
+      // no Zoho); excluída do calendário e do pipeline.
+      if (isUnnamed) { unnamedTotal += clientPrice; continue; }
 
       // Calendário de tesouraria Zoho (próximos 365 dias, independente do ano
       // fiscal): quando pagas ao Zoho vs quanto recebes do cliente.
@@ -353,6 +358,7 @@ async function buildLicenceRenewals(booksSoCustomers, year) {
     already_in_books_total: Math.round(alreadyInBooksTotal),
     own_total: Math.round(ownTotal),
     recurring_overlap_total: Math.round(recurringOverlapTotal),
+    unnamed_total: Math.round(unnamedTotal),
   };
 }
 
@@ -423,16 +429,19 @@ async function buildExpenses(year) {
   const cogsByMonth = emptyByMonth({ by_category: {} }); // COGS licenças
   const opexByMonth = emptyByMonth({ by_category: {} }); // overhead operacional
 
-  // Dedup por referência bancária (SEPA) + valor: o mesmo pagamento por vezes é
-  // lançado 2× no Books em categorias diferentes (ex.: Tesla como "viatura" e
-  // "combustível"). Mesma ref + mesmo valor → conta uma única vez.
+  // Dedup por referência bancária + valor DENTRO DO MESMO MÊS: o mesmo pagamento
+  // por vezes é lançado 2× no Books em categorias diferentes (ex.: Tesla como
+  // "viatura" e "combustível"). Chave inclui o mês para NÃO apagar prestações
+  // recorrentes que reutilizam a mesma referência entre meses (ex.: plano AT).
+  // Regex sem word-boundary final para apanhar refs coladas a letras
+  // (ex.: "…29336PPP", "ALD015040395").
   const seenRef = new Set();
   const add = (mk, amount, category, label, source) => {
     if (!mk || !(amount > 0)) return;
-    const refMatch = (label || "").match(/\b(\d{7,})\b/);
+    const refMatch = (label || "").match(/(\d{7,})/);
     if (refMatch) {
-      const key = refMatch[1] + "|" + Math.round(amount);
-      if (seenRef.has(key)) return; // duplicado
+      const key = mk + "|" + refMatch[1] + "|" + Math.round(amount);
+      if (seenRef.has(key)) return; // duplicado no mesmo mês
       seenRef.add(key);
     }
     const bucket = isCogsExpense(category, label) ? cogsByMonth : opexByMonth;
