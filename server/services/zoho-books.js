@@ -148,6 +148,26 @@ async function fetchSalesOrderDetail(soId) {
   return data.salesorder;
 }
 
+async function fetchInvoiceDetail(invId) {
+  const data = await booksGet(`/invoices/${invId}`);
+  return data.invoice;
+}
+
+// Corre uma lista de tarefas async com concorrência limitada (evita rajadas
+// que rebentem o rate-limit do Zoho).
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx], idx);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 async function healthCheck() {
   try {
     await getToken();
@@ -167,5 +187,7 @@ module.exports = {
   fetchExpenses,
   fetchSalesOrders,
   fetchSalesOrderDetail,
+  fetchInvoiceDetail,
+  mapLimit,
   healthCheck,
 };

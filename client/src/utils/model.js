@@ -49,7 +49,7 @@ export function vatableOpexForMonth(m, budget) {
 // (see server/api/dashboard.js): invoiced = faturação real; backlog = SOs por
 // faturar; renewals = renovações Zoho sem SO; recurring = recorrentes previstos
 // para meses futuros ainda não faturados.
-export function deriveMonthly(data, budget) {
+export function deriveMonthly(data, budget, accrualMode = false) {
   const cur = new Date();
   const curYear = cur.getFullYear();
   const curIdx = data.fiscal_year < curYear ? 11 : data.fiscal_year > curYear ? -1 : cur.getMonth();
@@ -99,13 +99,24 @@ export function deriveMonthly(data, budget) {
     const cogsForecast = data.licence_cogs_forecast?.by_month?.[m] || 0;
     const opexBudget = fixedCostsForMonth(m, budget) + oneOffForMonth(m, budget);
 
+    // Receita de licenças reconhecida no mês (real faturada + prevista) → base do
+    // COGS accrual. Serviços não têm COGS. margin = 1.18 (pass-through garantido).
+    const margin = budget.margin || 1.18;
+    const invoicedLic = data.invoiced?.[m]?.licences || 0;
+    const licenceRevenue = invoicedLic + backlogLic + renewals + recurring;
+    const cogsAccrual = Math.round(licenceRevenue / margin);
+
     const isPast = i <= curIdx;
     // Passado/corrente → real do Books (se não sincronizado, cai no orçamento).
     // Futuro → run-rate real (mediana dos meses completos) + saídas pontuais do
     // orçamento; cai no orçamento fixo só se ainda não houver histórico.
     const opexForecast = (opexBaseline != null ? opexBaseline : fixedCostsForMonth(m, budget)) + oneOffForMonth(m, budget);
     const opex = isPast ? (opexActual > 0 ? opexActual : opexBudget) : opexForecast;
-    const cogs = isPast ? cogsActual : cogsForecast;
+    // Cash: COGS na data de pagamento ao Zoho (real passado / previsto futuro).
+    // Accrual: COGS reconhecido com a receita de licenças (revenue/margin),
+    // eliminando o artefacto de timing (ex.: Leasys pago em Jan vs faturado antes).
+    const cogsCash = isPast ? cogsActual : cogsForecast;
+    const cogs = accrualMode ? cogsAccrual : cogsCash;
     const expense = opex + cogs;
 
     const net = revenue - expense;

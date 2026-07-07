@@ -92,26 +92,50 @@ function buildSoDesc(lineItems) {
 // ─── FATURAÇÃO (actual invoiced, by invoice date) ────────────────────────────
 async function buildInvoiced(year) {
   const invoices = await books.fetchAllInvoices(year).catch(() => []);
-  const invoiced = emptyByMonth();
+  const invoiced = emptyByMonth({ services: 0, licences: 0 });
   const paid = emptyByMonth();
   const receivable = { total: 0, overdue: 0, current: 0, by_due_month: emptyByMonth({ overdue: 0 }) };
 
   const today = new Date();
 
-  for (const inv of invoices) {
-    if (inv.customer_name === "TESTE") continue;
+  // Classifica cada fatura em serviços vs licenças a partir das linhas (para a
+  // vista accrual: reconhecer o COGS de licenças com a receita de licenças).
+  const relevant = invoices.filter((inv) => inv.customer_name !== "TESTE");
+  const splitById = {};
+  await books.mapLimit(relevant, 8, async (inv) => {
+    try {
+      const d = await books.fetchInvoiceDetail(inv.invoice_id);
+      const { services, licences } = splitLineItems(d?.line_items || []);
+      const gross = services + licences;
+      const total = Number(inv.total || 0);
+      // normaliza ao total da fatura (descontos/impostos)
+      const ratioLic = gross > 0 ? licences / gross : 0;
+      splitById[inv.invoice_id] = { ratioLic };
+    } catch {
+      splitById[inv.invoice_id] = { ratioLic: 0 };
+    }
+  });
+
+  for (const inv of relevant) {
     const mk = monthKey(inv.date || inv.invoice_date);
     if (!mk) continue;
     const total = Number(inv.total || 0);
     const balance = Number(inv.balance || 0);
     const status = (inv.status || "").toLowerCase();
+    const ratioLic = splitById[inv.invoice_id]?.ratioLic || 0;
+    const licPart = Math.round(total * ratioLic * 100) / 100;
+    const svcPart = Math.round((total - licPart) * 100) / 100;
 
     invoiced[mk].total += total;
+    invoiced[mk].licences += licPart;
+    invoiced[mk].services += svcPart;
     invoiced[mk].items.push({
       invoice_id: inv.invoice_id,
       number: inv.invoice_number,
       client: inv.customer_name,
       amount: total,
+      licences: licPart,
+      services: svcPart,
       balance,
       date: inv.date,
       due_date: inv.due_date,
@@ -584,6 +608,8 @@ async function buildDashboard(year) {
 
   const totals = {
     invoiced: sumTotals(invoiced),
+    invoiced_licences: Math.round(MONTHS.reduce((a, m) => a + (invoiced[m].licences || 0), 0)),
+    invoiced_services: Math.round(MONTHS.reduce((a, m) => a + (invoiced[m].services || 0), 0)),
     paid: sumTotals(paid),
     receivable: Math.round(receivable.total),
     receivable_overdue: Math.round(receivable.overdue),

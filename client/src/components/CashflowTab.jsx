@@ -263,8 +263,26 @@ function InvoiceDetail({ data }) {
   );
 }
 
+function CashAccrualToggle({ mode, setMode }) {
+  const opts = [
+    { key: "cash", label: "Caixa", hint: "COGS na data de pagamento ao Zoho (cashflow real)" },
+    { key: "accrual", label: "Accrual", hint: "COGS reconhecido com a receita de licenças (rentabilidade económica)" },
+  ];
+  return (
+    <div style={{ display: "flex", border: `1px solid ${C.border}`, borderRadius: 7, overflow: "hidden" }}>
+      {opts.map((o) => (
+        <button key={o.key} onClick={() => setMode(o.key)} title={o.hint}
+          style={{ padding: "5px 14px", border: "none", borderRight: o.key === "cash" ? `1px solid ${C.border}` : "none", background: mode === o.key ? C.text : "transparent", color: mode === o.key ? "#fff" : C.muted, fontSize: 12, fontWeight: mode === o.key ? 700 : 500, cursor: "pointer" }}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function CashflowTab({ data, budget }) {
-  const model = useMemo(() => deriveMonthly(data, budget), [data, budget]);
+  const [accrualMode, setAccrualMode] = useState("cash");
+  const model = useMemo(() => deriveMonthly(data, budget, accrualMode === "accrual"), [data, budget, accrualMode]);
   const { rows, totals } = model;
   const [openRev, setOpenRev] = useState(false);
   const [openCogs, setOpenCogs] = useState(false);
@@ -274,9 +292,16 @@ export default function CashflowTab({ data, budget }) {
   return (
     <div>
       <div style={{ padding: 14, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Faturação vs Despesa · {data.fiscal_year}</div>
-        <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-          Realizado nos meses passados; barras claras são previsão (backlog de SOs, renovações Zoho e recorrentes).
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Faturação vs Despesa · {data.fiscal_year}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+              {accrualMode === "accrual"
+                ? "Accrual: COGS de licenças reconhecido com a receita (sem o artefacto de timing do pagamento ao Zoho)."
+                : "Caixa: COGS na data em que pagas ao Zoho (reflete o cashflow real)."}
+            </div>
+          </div>
+          <CashAccrualToggle mode={accrualMode} setMode={setAccrualMode} />
         </div>
         <BarChart rows={rows} monthlyGoal={monthlyGoal} />
       </div>
@@ -304,12 +329,12 @@ export default function CashflowTab({ data, budget }) {
             {openRev && <RevenueBreakdown rows={rows} />}
 
             <Row
-              label="− Compra de licenças (COGS Zoho)" bold
-              clickable open={openCogs} onToggle={() => setOpenCogs(!openCogs)}
+              label={accrualMode === "accrual" ? "− COGS licenças (reconhecido c/ receita)" : "− Compra de licenças (COGS Zoho, caixa)"} bold
+              clickable={accrualMode !== "accrual"} open={openCogs} onToggle={() => setOpenCogs(!openCogs)}
               cells={rows.map((r) => (r.cogs ? <span style={{ color: C.orange }}>-{fmtK(r.cogs)}</span> : <span style={{ color: C.faint }}>—</span>))}
               total={<span style={{ color: C.orange, fontWeight: 700 }}>-{fmt(totals.cogs)}</span>}
             />
-            {openCogs && <CostBreakdown data={data} rows={rows} which="cogs" />}
+            {openCogs && accrualMode !== "accrual" && <CostBreakdown data={data} rows={rows} which="cogs" />}
 
             <Row
               label="= Margem bruta" bold color={C.muted}
