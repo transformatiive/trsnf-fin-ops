@@ -4,6 +4,7 @@ import KpiPills from "./components/KpiPills";
 import TabBar from "./components/TabBar";
 import CashflowTab from "./components/CashflowTab";
 import BacklogTab from "./components/BacklogTab";
+import TimingTab from "./components/TimingTab";
 import LicencesTab from "./components/LicencesTab";
 import AnalysisPanel from "./components/AnalysisPanel";
 import BudgetEditor from "./components/BudgetEditor";
@@ -105,7 +106,7 @@ export default function App() {
 
   const { budget, setBudget } = useBudget(authedFetch);
   const { data, loading, error, lastRefresh, reload } = useDashboard(authedFetch, !!token, year);
-  const analysis = useAnalysis(token, tab === "cashflow" ? "pl" : "actions", !!token && !!data && tab !== "licences");
+  const analysis = useAnalysis(token, tab === "cashflow" ? "pl" : "actions", !!token && !!data && (tab === "cashflow" || tab === "backlog"));
 
   const netResult = useMemo(() => (data ? deriveMonthly(data, budget).totals.net : 0), [data, budget]);
 
@@ -156,6 +157,7 @@ export default function App() {
                 <AnalysisPanel tab="actions" text={analysis.text} loading={analysis.loading} error={analysis.error} onReload={analysis.reload} />
               </>
             )}
+            {tab === "timing" && <TimingTab data={data} />}
             {tab === "licences" && <LicencesTab data={data} />}
           </>
         )}

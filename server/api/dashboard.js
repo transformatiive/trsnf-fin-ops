@@ -232,6 +232,7 @@ async function buildLicenceRenewals(booksSoCustomers, year) {
   const resellerByMonth = {};      // custo reseller (COGS) dessas mesmas renovações
   MONTHS.forEach((m) => { byMonth[m] = 0; resellerByMonth[m] = 0; });
   const items = [];
+  const calendar = [];             // compromissos Zoho próximos 365 dias
   let alreadyInBooksTotal = 0;
   let ownTotal = 0;                // subscrições próprias (custo interno, não receita)
   let recurringOverlapTotal = 0;   // já cobertas por recurring_forecast
@@ -244,6 +245,7 @@ async function buildLicenceRenewals(booksSoCustomers, year) {
     const yStart = new Date(Date.UTC(year, 0, 1));
     const yEnd = new Date(Date.UTC(year, 11, 31, 23, 59, 59));
     const lower = now > yStart ? now : yStart; // não incluir renovações já passadas
+    const horizon365 = new Date(now.getTime() + 365 * 86400000);
 
     for (const sub of subs) {
       const st = (sub.status || "").toLowerCase();
@@ -254,10 +256,7 @@ async function buildLicenceRenewals(booksSoCustomers, year) {
         sub.expires_on || sub.expiry_date || sub.end_date;
       if (!renewalRaw) continue;
       const d = renewalRaw.includes("T") ? new Date(renewalRaw) : new Date(renewalRaw + "T00:00:00Z");
-      if (isNaN(d)) continue;
-      // Só renovações do ANO fiscal selecionado (e ainda futuras). Corrige o bug
-      // de renovações de 2027 aparecerem na vista de 2026.
-      if (d < lower || d > yEnd) continue;
+      if (isNaN(d) || d < now) continue; // só renovações futuras
 
       const origCurrency = (sub.currency || "EUR").toUpperCase();
       const origAmount = Number(
@@ -276,6 +275,27 @@ async function buildLicenceRenewals(booksSoCustomers, year) {
       const isOwn = isOwnEntity(clientName);
       const isRecurring = matchesMonthlyClient(clientName);
       const alreadyInBooks = soNorm.has(normName(clientName));
+
+      // Calendário de tesouraria Zoho (próximos 365 dias, independente do ano
+      // fiscal): quando pagas ao Zoho vs quanto recebes do cliente.
+      if (d <= horizon365) {
+        calendar.push({
+          date: renewalRaw,
+          client: clientName,
+          service,
+          zoho_out: resellerPriceEUR,        // pagamento ao Zoho (COGS)
+          client_in: isOwn ? 0 : clientPrice, // receita do cliente (0 se própria)
+          margin: isOwn ? 0 : Math.round(clientPrice - resellerPriceEUR),
+          already_in_books: !!alreadyInBooks,
+          is_own: isOwn,
+          is_recurring: isRecurring,
+          orig_currency: origCurrency,
+        });
+      }
+
+      // Pipeline do ANO fiscal selecionado (corrige o bug das renovações de 2027
+      // aparecerem em 2026).
+      if (d < lower || d > yEnd) continue;
 
       items.push({
         store: sub._store,
@@ -311,6 +331,7 @@ async function buildLicenceRenewals(booksSoCustomers, year) {
     by_month: byMonth,
     reseller_by_month: resellerByMonth,
     items: items.sort((a, b) => MONTHS.indexOf(a.month) - MONTHS.indexOf(b.month)),
+    calendar: calendar.sort((a, b) => new Date(a.date) - new Date(b.date)),
     total: Math.round(MONTHS.reduce((a, m) => a + byMonth[m], 0)),
     already_in_books_total: Math.round(alreadyInBooksTotal),
     own_total: Math.round(ownTotal),

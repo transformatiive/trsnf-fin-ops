@@ -4,6 +4,7 @@ import { C } from "../utils/constants";
 const TABS = [
   { key: "cashflow", label: "Tesouraria" },
   { key: "backlog", label: "Por Faturar" },
+  { key: "timing", label: "Timing Zoho" },
   { key: "licences", label: "Licenças" },
 ];
 
