@@ -505,8 +505,11 @@ async function buildForecastDeals(year) {
   const byMonth = emptyByMonth();
   const items = [];
   let scope_ok = true;
+  const stagesSeen = {}; // diagnóstico: estágios existentes e nº de deals
 
   for (const dl of deals) {
+    const rawStage = dl.Stage || "—";
+    stagesSeen[rawStage] = (stagesSeen[rawStage] || 0) + 1;
     const stage = (dl.Stage || "").toLowerCase();
     if (/closed|won|lost|ganho|perdido/.test(stage)) continue; // Won→SO, Lost fora
     if (stages.length && !stages.some((s) => stage.includes(s))) continue;
@@ -543,6 +546,8 @@ async function buildForecastDeals(year) {
     total_all: Math.round(items.reduce((a, d) => a + d.amount, 0)),
     count: items.length,
     scope_ok,
+    stages_seen: stagesSeen,
+    open_deals_count: deals.length,
   };
 }
 
