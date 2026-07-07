@@ -204,12 +204,34 @@ function invoiceState(it) {
   return { label: "Por pagar", color: C.blueText, bg: C.blueLight };
 }
 
+const KIND = {
+  faturado: { label: "Faturado", color: C.greenText, bg: C.greenLight },
+  so: { label: "Por faturar · SO", color: C.amberText, bg: C.amberLight },
+  renovacao: { label: "Renovação Zoho", color: C.orange, bg: "#fff7ed" },
+  recorrente: { label: "Recorrente prev.", color: C.blueText, bg: C.blueLight },
+};
+
 function InvoiceDetail({ data }) {
   const [open, setOpen] = useState(false);
   const rows = [];
+  // Faturas reais
   for (const m of MONTHS) {
     for (const it of data.invoiced?.[m]?.items || []) {
-      rows.push({ ...it, month: m, mi: MONTHS.indexOf(m) });
+      rows.push({ month: m, mi: MONTHS.indexOf(m), client: it.client, doc: it.number, amount: it.amount, kind: "faturado", state: invoiceState(it) });
+    }
+  }
+  // SOs por faturar (adjudicados, ainda sem fatura)
+  for (const it of data.to_invoice?.items || []) {
+    rows.push({ month: it.month, mi: MONTHS.indexOf(it.month), client: it.client, doc: `${it.so_number || "SO"}${it.desc ? " · " + it.desc : ""}`, amount: it.amount, kind: "so" });
+  }
+  // Renovações Zoho contadas
+  for (const it of (data.licence_renewals?.items || []).filter((l) => l.counted)) {
+    rows.push({ month: it.month, mi: MONTHS.indexOf(it.month), client: it.client, doc: `Renovação ${it.service || ""}`, amount: it.amount, kind: "renovacao" });
+  }
+  // Recorrentes previstos (meses em forecast)
+  for (const c of data.recurring_forecast?.clients || []) {
+    for (const m of MONTHS) {
+      if (c.months[m] === "forecast") rows.push({ month: m, mi: MONTHS.indexOf(m), client: c.client, doc: `Avença ${c.service || ""}`, amount: c.monthly, kind: "recorrente" });
     }
   }
   rows.sort((a, b) => a.mi - b.mi || b.amount - a.amount);
@@ -217,41 +239,39 @@ function InvoiceDetail({ data }) {
 
   return (
     <div style={{ marginTop: 16, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
-      <div
-        onClick={() => setOpen(!open)}
-        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", cursor: "pointer" }}
-      >
+      <div onClick={() => setOpen(!open)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", cursor: "pointer" }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
           <span style={{ marginRight: 6, color: C.muted, fontSize: 10 }}>{open ? "▼" : "▶"}</span>
-          Detalhe — Faturas emitidas ({rows.length})
+          Detalhe da faturação (real + prevista) ({rows.length})
         </div>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.greenText, fontVariantNumeric: "tabular-nums" }}>{fmt(total)}</div>
       </div>
       {open && (
         <div className="table-scroll" style={{ borderTop: `1px solid ${C.border}` }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 560 }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                {["Mês", "Cliente", "Documento", "Valor", "Estado"].map((h, i) => (
-                  <th key={h} style={{ textAlign: i >= 3 ? "right" : "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>{h}</th>
+                {["Mês", "Cliente", "Documento / Origem", "Tipo", "Valor"].map((h, i) => (
+                  <th key={h} style={{ textAlign: i >= 4 ? "right" : "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr><td colSpan={5} style={{ padding: 16, color: C.muted, textAlign: "center" }}>Sem faturas emitidas neste ano.</td></tr>
+                <tr><td colSpan={5} style={{ padding: 16, color: C.muted, textAlign: "center" }}>Sem movimentos neste ano.</td></tr>
               )}
               {rows.map((it, i) => {
-                const s = invoiceState(it);
+                const k = KIND[it.kind];
                 return (
                   <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <td style={{ padding: "7px 10px", color: C.muted, whiteSpace: "nowrap" }}>{MONTHS_PT[it.mi]}{it.date ? <span style={{ color: C.faint }}> · {it.date.slice(8, 10)}</span> : null}</td>
+                    <td style={{ padding: "7px 10px", color: C.muted, whiteSpace: "nowrap" }}>{MONTHS_PT[it.mi]}</td>
                     <td style={{ padding: "7px 10px", color: C.text }}>{it.client || "—"}</td>
-                    <td style={{ padding: "7px 10px", color: C.muted, whiteSpace: "nowrap" }}>{it.number || "—"}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(it.amount)}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
-                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: s.bg, color: s.color }}>{s.label}</span>
+                    <td style={{ padding: "7px 10px", color: C.muted }}>{it.doc || "—"}</td>
+                    <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: k.bg, color: k.color }}>{k.label}</span>
+                      {it.kind === "faturado" && it.state && <span style={{ marginLeft: 4, fontSize: 9, color: it.state.color }}>· {it.state.label}</span>}
                     </td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(it.amount)}</td>
                   </tr>
                 );
               })}
