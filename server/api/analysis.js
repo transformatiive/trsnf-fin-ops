@@ -2,7 +2,7 @@ const axios = require("axios");
 const { buildDashboard } = require("./dashboard");
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-const MODEL = "anthropic/claude-3.5-sonnet";
+const MODEL = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-5";
 
 function fmtEur(n) {
   return "€" + Math.round(Number(n) || 0).toLocaleString("pt-PT");
@@ -104,7 +104,7 @@ async function streamAnalysis(req, res) {
 
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    res.write(`data: ${JSON.stringify({ text: "⚠ OPENROUTER_API_KEY não configurada em Replit Secrets." })}\n\n`);
+    res.write(`data: ${JSON.stringify({ text: "⚠ OPENROUTER_API_KEY não configurada nas variáveis de ambiente do serviço." })}\n\n`);
     res.write("data: [DONE]\n\n");
     return res.end();
   }

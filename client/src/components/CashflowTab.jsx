@@ -179,6 +179,72 @@ function RevenueBreakdown({ rows }) {
   );
 }
 
+// ─── Detalhe: faturas emitidas (o que já foi faturado, uma a uma) ────────────
+function invoiceState(it) {
+  if ((it.balance || 0) <= 0.01) return { label: "Pago", color: C.greenText, bg: C.greenLight };
+  if (it.status === "overdue") return { label: "Em atraso", color: C.red, bg: C.redLight };
+  return { label: "Por pagar", color: C.blueText, bg: C.blueLight };
+}
+
+function InvoiceDetail({ data }) {
+  const [open, setOpen] = useState(false);
+  const rows = [];
+  for (const m of MONTHS) {
+    for (const it of data.invoiced?.[m]?.items || []) {
+      rows.push({ ...it, month: m, mi: MONTHS.indexOf(m) });
+    }
+  }
+  rows.sort((a, b) => a.mi - b.mi || b.amount - a.amount);
+  const total = rows.reduce((a, r) => a + (r.amount || 0), 0);
+
+  return (
+    <div style={{ marginTop: 16, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", cursor: "pointer" }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+          <span style={{ marginRight: 6, color: C.muted, fontSize: 10 }}>{open ? "▼" : "▶"}</span>
+          Detalhe — Faturas emitidas ({rows.length})
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.greenText, fontVariantNumeric: "tabular-nums" }}>{fmt(total)}</div>
+      </div>
+      {open && (
+        <div className="table-scroll" style={{ borderTop: `1px solid ${C.border}` }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                {["Mês", "Cliente", "Documento", "Valor", "Estado"].map((h, i) => (
+                  <th key={h} style={{ textAlign: i >= 3 ? "right" : "left", padding: "8px 10px", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr><td colSpan={5} style={{ padding: 16, color: C.muted, textAlign: "center" }}>Sem faturas emitidas neste ano.</td></tr>
+              )}
+              {rows.map((it, i) => {
+                const s = invoiceState(it);
+                return (
+                  <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "7px 10px", color: C.muted, whiteSpace: "nowrap" }}>{MONTHS_PT[it.mi]}{it.date ? <span style={{ color: C.faint }}> · {it.date.slice(8, 10)}</span> : null}</td>
+                    <td style={{ padding: "7px 10px", color: C.text }}>{it.client || "—"}</td>
+                    <td style={{ padding: "7px 10px", color: C.muted, whiteSpace: "nowrap" }}>{it.number || "—"}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(it.amount)}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: s.bg, color: s.color }}>{s.label}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CashflowTab({ data, budget }) {
   const model = useMemo(() => deriveMonthly(data, budget), [data, budget]);
   const { rows, totals } = model;
@@ -245,6 +311,8 @@ export default function CashflowTab({ data, budget }) {
           </tbody>
         </table>
       </div>
+
+      <InvoiceDetail data={data} />
 
       <div style={{ marginTop: 12, padding: 12, background: C.surfaceAlt, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, color: C.muted, lineHeight: 1.6 }}>
         <strong style={{ color: C.text }}>Como ler:</strong> a faturação de meses passados vem das faturas reais do Zoho Books;
