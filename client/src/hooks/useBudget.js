@@ -32,6 +32,7 @@ export const DEFAULT_BUDGET = {
   monthly_goal: 20833,
   salary: 1114,
   irc_rate: 0.21,
+  iva_rate: 0.23, // IVA standard PT — estimativa trimestral
   margin: 1.18,
   fixed_costs: [
     { name: "Leasys Renting", amount: 616,  frequency: "monthly",    start_month: "Jan" },

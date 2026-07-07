@@ -326,6 +326,12 @@ export default function CashflowTab({ data, budget }) {
             {openCost && <CostBreakdown data={data} rows={rows} which="opex" budget={budget} />}
 
             <Row
+              label="− IVA estimado (trimestral)" color={C.muted}
+              cells={rows.map((r) => (r.iva ? <span style={{ color: C.red }}>-{fmtK(r.iva)}</span> : <span style={{ color: C.faint }}>—</span>))}
+              total={<span style={{ color: C.red }}>-{fmt(totals.iva)}</span>}
+            />
+
+            <Row
               label="= Resultado Líquido" bold
               cells={rows.map((r) => (
                 <span style={{ color: r.net >= 0 ? C.greenText : C.red, fontWeight: 700 }}>{fmtK(r.net)}</span>

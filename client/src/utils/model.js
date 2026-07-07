@@ -65,9 +65,29 @@ export function deriveMonthly(data, budget) {
       backlog, backlogSvc, backlogLic, renewals, recurring,
       revenueActual, revenueForecast, revenue,
       cogsActual, opexActual, cogsForecast, opexBudget,
-      opex, cogs, expense, net, grossMargin,
+      opex, cogs, iva: 0, expense, net, grossMargin,
     };
   });
+
+  // IVA estimado (regime trimestral PT, 23%). Base ≈ valor acrescentado do
+  // trimestre (faturação − COGS − opex). Pago em Mai(Q1)/Ago(Q2)/Nov(Q3);
+  // Q4 paga em Fev do ano seguinte (fora desta vista). Só previsto para meses
+  // futuros — o passado já traz "Impostos a pagar" real no opex.
+  const ivaRate = budget.iva_rate ?? 0.23;
+  const quarters = [
+    { months: [0, 1, 2], pay: 4 },   // Q1 → Maio
+    { months: [3, 4, 5], pay: 7 },   // Q2 → Agosto
+    { months: [6, 7, 8], pay: 10 },  // Q3 → Novembro
+  ];
+  for (const q of quarters) {
+    if (q.pay <= curIdx) continue; // pagamento já passado → real no opex
+    const base = q.months.reduce((a, i) => a + (rows[i].revenue - rows[i].cogs - rows[i].opex), 0);
+    const iva = Math.max(0, Math.round(ivaRate * base));
+    const r = rows[q.pay];
+    r.iva = iva;
+    r.expense += iva;
+    r.net -= iva;
+  }
 
   const sum = (f) => Math.round(rows.reduce((a, r) => a + f(r), 0));
   const totals = {
@@ -78,6 +98,7 @@ export function deriveMonthly(data, budget) {
     revenueForecast: sum((r) => r.revenueForecast),
     cogs: sum((r) => r.cogs),
     opex: sum((r) => r.opex),
+    iva: sum((r) => r.iva),
     expense: sum((r) => r.expense),
     grossMargin: sum((r) => r.grossMargin),
     net: sum((r) => r.net),

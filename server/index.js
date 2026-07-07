@@ -11,22 +11,21 @@ const { getBudget, saveBudget } = require("./api/budget");
 
 const PORT = process.env.PORT || 3000;
 
-// Static access token. Access is granted by passing this token in the URL
-// (?token=…) or as an Authorization: Bearer header. Override via ACCESS_TOKEN.
-const DEFAULT_ACCESS_TOKEN = "trnsf-fin-2026-a7f3c9e14b";
-
+// Access token comes ONLY from the environment (ACCESS_TOKEN / APP_PASSWORD).
+// No baked-in default: if unset, the gate fails closed (denies everything).
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // -------- Token gate --------
 function getAccessToken() {
-  return process.env.ACCESS_TOKEN || process.env.APP_PASSWORD || DEFAULT_ACCESS_TOKEN;
+  return process.env.ACCESS_TOKEN || process.env.APP_PASSWORD || null;
 }
 
 function verifyToken(token) {
-  if (!token || typeof token !== "string") return false;
   const expected = getAccessToken();
+  if (!expected) return false; // fail-closed: sem ACCESS_TOKEN configurado, nega tudo
+  if (!token || typeof token !== "string") return false;
   if (token.length !== expected.length) return false;
   // constant-time compare
   let diff = 0;
@@ -102,7 +101,11 @@ async function start() {
   await loadCredentials({ overwrite: false });
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[server] listening on http://0.0.0.0:${PORT}`);
-    console.log(`[server] auth: URL token gate enabled (?token=…)`);
+    if (getAccessToken()) {
+      console.log(`[server] auth: URL token gate enabled (?token=…)`);
+    } else {
+      console.warn(`[server] ⚠ ACCESS_TOKEN not set — all /api requests will be denied (fail-closed)`);
+    }
     if (process.env.RAILWAY_PUBLIC_DOMAIN) {
       console.log(`[server] public domain: https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
     }
