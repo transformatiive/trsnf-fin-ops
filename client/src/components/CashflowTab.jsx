@@ -146,15 +146,15 @@ function CostBreakdown({ data, rows, which, budget }) {
     );
   });
 
-  // Opex: mostrar também o orçamento previsto usado nos meses futuros.
-  if (which === "opex" && budget) {
+  // Opex: mostrar o previsto (run-rate real) usado nos meses futuros.
+  if (which === "opex") {
     const anyForecast = rows.some((r) => !r.isPast);
     if (anyForecast) {
       rowsOut.push(
-        <Row key="__budget" indent={16} color={C.faint} italic
-          label="Orçamento previsto (meses futuros)"
-          cells={rows.map((r) => (!r.isPast ? "-" + fmtK(r.opexBudget) : "—"))}
-          total={"-" + fmt(rows.filter((r) => !r.isPast).reduce((a, r) => a + r.opexBudget, 0))}
+        <Row key="__fc" indent={16} color={C.faint} italic
+          label="Opex previsto (run-rate real dos meses passados)"
+          cells={rows.map((r) => (!r.isPast ? "-" + fmtK(r.opex) : "—"))}
+          total={"-" + fmt(rows.filter((r) => !r.isPast).reduce((a, r) => a + r.opex, 0))}
         />
       );
     }

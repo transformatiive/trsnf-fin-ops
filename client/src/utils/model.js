@@ -54,6 +54,32 @@ export function deriveMonthly(data, budget) {
   const curYear = cur.getFullYear();
   const curIdx = data.fiscal_year < curYear ? 11 : data.fiscal_year > curYear ? -1 : cur.getMonth();
 
+  // Run-rate real de opex a partir dos meses COMPLETOS já passados (exclui o mês
+  // corrente parcial). Baseline do opex futuro = mediana desses meses, sem a
+  // rubrica de impostos (que já entra na linha de IVA). Mais fiel que o orçamento
+  // fixo. vatableBaseline = idem, mas só rubricas com IVA dedutível.
+  const median = (arr) => {
+    if (!arr.length) return null;
+    const s = arr.slice().sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return Math.round(s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2);
+  };
+  const isTaxCat = (k) => /imposto/i.test(k);
+  const isNonVatCat = (k) => /imposto|seguro|financ|credibom|banco|leasing|juros/i.test(k);
+  const pastOpex = [];
+  const pastVat = [];
+  for (let i = 0; i < curIdx; i++) { // só meses completos anteriores ao atual
+    const bc = data.expenses?.opex_by_month?.[MONTHS[i]]?.by_category || {};
+    const total = data.expenses?.opex_by_month?.[MONTHS[i]]?.total || 0;
+    if (total <= 0) continue;
+    const exTax = Object.entries(bc).reduce((a, [k, v]) => a + (isTaxCat(k) ? 0 : v), 0);
+    const vat = Object.entries(bc).reduce((a, [k, v]) => a + (isNonVatCat(k) ? 0 : v), 0);
+    pastOpex.push(exTax);
+    pastVat.push(vat);
+  }
+  const opexBaseline = median(pastOpex);       // opex previsto/mês (futuro)
+  const vatableBaseline = median(pastVat);     // base de IVA/mês (futuro)
+
   const rows = MONTHS.map((m, i) => {
     const invoiced = data.invoiced?.[m]?.total || 0;
     const paid = data.paid?.[m]?.total || 0;
@@ -74,16 +100,18 @@ export function deriveMonthly(data, budget) {
     const opexBudget = fixedCostsForMonth(m, budget) + oneOffForMonth(m, budget);
 
     const isPast = i <= curIdx;
-    // Passado/corrente → real do Books (se não sincronizado, cai no orçamento/forecast).
-    // Futuro → opex orçamentado + COGS previsto (compra de licenças).
-    const opex = isPast ? (opexActual > 0 ? opexActual : opexBudget) : opexBudget;
+    // Passado/corrente → real do Books (se não sincronizado, cai no orçamento).
+    // Futuro → run-rate real (mediana dos meses completos) + saídas pontuais do
+    // orçamento; cai no orçamento fixo só se ainda não houver histórico.
+    const opexForecast = (opexBaseline != null ? opexBaseline : fixedCostsForMonth(m, budget)) + oneOffForMonth(m, budget);
+    const opex = isPast ? (opexActual > 0 ? opexActual : opexBudget) : opexForecast;
     const cogs = isPast ? cogsActual : cogsForecast;
     const expense = opex + cogs;
 
     const net = revenue - expense;
     const grossMargin = revenue - cogs; // margem antes de overhead
-    // Base de IVA: opex com IVA (futuro exclui financiamento/seguros; passado usa real).
-    const vatableOpex = isPast ? opex : vatableOpexForMonth(m, budget);
+    // Base de IVA: opex com IVA (futuro = run-rate vatable; passado usa real).
+    const vatableOpex = isPast ? opex : (vatableBaseline != null ? vatableBaseline : vatableOpexForMonth(m, budget));
 
     return {
       month: m, i, isPast,
