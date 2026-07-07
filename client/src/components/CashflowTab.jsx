@@ -213,6 +213,10 @@ const KIND = {
 
 function InvoiceDetail({ data }) {
   const [open, setOpen] = useState(false);
+  const now = new Date();
+  const curY = now.getUTCFullYear();
+  const curMi = now.getUTCMonth();
+  const isPastMonth = (mi) => data.fiscal_year < curY || (data.fiscal_year === curY && mi < curMi);
   const rows = [];
   // Faturas reais
   for (const m of MONTHS) {
@@ -220,9 +224,10 @@ function InvoiceDetail({ data }) {
       rows.push({ month: m, mi: MONTHS.indexOf(m), client: it.client, doc: it.number, amount: it.amount, kind: "faturado", state: invoiceState(it) });
     }
   }
-  // SOs por faturar (adjudicados, ainda sem fatura)
+  // SOs por faturar (adjudicados, ainda sem fatura). Mês passado = atrasado.
   for (const it of data.to_invoice?.items || []) {
-    rows.push({ month: it.month, mi: MONTHS.indexOf(it.month), client: it.client, doc: `${it.so_number || "SO"}${it.desc ? " · " + it.desc : ""}`, amount: it.amount, kind: "so" });
+    const mi = MONTHS.indexOf(it.month);
+    rows.push({ month: it.month, mi, client: it.client, doc: `${it.so_number || "SO"}${it.desc ? " · " + it.desc : ""}`, amount: it.amount, kind: "so", overdue: isPastMonth(mi) });
   }
   // Renovações Zoho contadas
   for (const it of (data.licence_renewals?.items || []).filter((l) => l.counted)) {
@@ -268,7 +273,11 @@ function InvoiceDetail({ data }) {
                     <td style={{ padding: "7px 10px", color: C.text }}>{it.client || "—"}</td>
                     <td style={{ padding: "7px 10px", color: C.muted }}>{it.doc || "—"}</td>
                     <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>
-                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: k.bg, color: k.color }}>{k.label}</span>
+                      {it.kind === "so" && it.overdue ? (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: C.redLight, color: C.red }}>⚠ Atrasado a faturar</span>
+                      ) : (
+                        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: k.bg, color: k.color }}>{k.label}</span>
+                      )}
                       {it.kind === "faturado" && it.state && <span style={{ marginLeft: 4, fontSize: 9, color: it.state.color }}>· {it.state.label}</span>}
                     </td>
                     <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(it.amount)}</td>

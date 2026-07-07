@@ -2,6 +2,13 @@ import React, { useState } from "react";
 import { C, MONTHS, MONTHS_PT } from "../utils/constants";
 import { fmt, fmtK } from "../utils/fmt";
 
+// Mês já passado no ano fiscal em vista (SO com esta data e ainda aberto = atrasado a faturar).
+function isPastMonth(mi, fiscalYear) {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  return fiscalYear < y || (fiscalYear === y && mi < now.getUTCMonth());
+}
+
 function MonthGridHeader({ firstColLabel }) {
   return (
     <thead>
@@ -49,9 +56,16 @@ function ToInvoiceSection({ data }) {
   }
   const t = data.totals || {};
   const items = (data.to_invoice?.items || []).slice().sort((a, b) => MONTHS.indexOf(a.month) - MONTHS.indexOf(b.month));
+  const overdueTotal = items.filter((it) => isPastMonth(MONTHS.indexOf(it.month), data.fiscal_year)).reduce((a, it) => a + it.amount, 0);
 
   return (
-    <div className="table-scroll" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 20 }}>
+    <div style={{ marginBottom: 20 }}>
+      {overdueTotal > 0 && (
+        <div style={{ padding: "10px 14px", background: C.redLight, border: `1px solid ${C.redBorder}`, borderRadius: 10, marginBottom: 10, fontSize: 12, color: C.red, fontWeight: 600 }}>
+          ⚠ {fmt(overdueTotal)} em SOs de meses passados ainda por faturar — devias já ter faturado (ver linhas a vermelho).
+        </div>
+      )}
+      <div className="table-scroll" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 }}>
       <table className="dash-table" style={{ width: "100%", borderCollapse: "collapse" }}>
         <MonthGridHeader firstColLabel="Por Faturar — SOs abertas" />
         <tbody>
@@ -70,16 +84,18 @@ function ToInvoiceSection({ data }) {
           {open && items.map((it, i) => {
             const bmItem = {}; MONTHS.forEach((m) => (bmItem[m] = m === it.month ? it.amount : 0));
             const mix = it.licences > 0 && it.services > 0 ? "misto" : it.licences > 0 ? "licença" : "serviço";
+            const overdue = isPastMonth(MONTHS.indexOf(it.month), data.fiscal_year);
             return (
-              <GridRow key={i} indent={16} color={C.muted}
-                label={`${it.client} (${it.so_number || "—"})`}
-                sub={`${mix}${it.desc ? " · " + it.desc : ""}`}
+              <GridRow key={i} indent={16} color={overdue ? C.red : C.muted}
+                label={`${overdue ? "⚠ " : ""}${it.client} (${it.so_number || "—"})`}
+                sub={`${overdue ? "atrasado a faturar · " : ""}${mix}${it.desc ? " · " + it.desc : ""}`}
                 byMonth={bmItem} total={it.amount}
               />
             );
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
