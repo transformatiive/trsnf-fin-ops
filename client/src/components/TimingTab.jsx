@@ -97,6 +97,8 @@ export default function TimingTab({ data }) {
                 ? { label: "Já em SO", color: C.greenText, bg: C.greenLight }
                 : r.is_recurring
                 ? { label: "Avença mensal", color: C.blueText, bg: C.blueLight }
+                : soon
+                ? { label: "⚠ Urgente — sem SO", color: C.red, bg: C.redLight }
                 : { label: "A faturar", color: C.amberText, bg: C.amberLight };
               return (
                 <tr key={i} style={{ borderBottom: `1px solid ${C.border}`, background: soon && !r.is_own ? "#fff8f6" : "transparent" }}>

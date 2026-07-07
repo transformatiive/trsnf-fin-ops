@@ -229,9 +229,12 @@ function InvoiceDetail({ data }) {
     const mi = MONTHS.indexOf(it.month);
     rows.push({ month: it.month, mi, client: it.client, doc: `${it.so_number || "SO"}${it.desc ? " · " + it.desc : ""}`, amount: it.amount, kind: "so", overdue: isPastMonth(mi) });
   }
-  // Renovações Zoho contadas
+  // Renovações Zoho contadas (sem SO). Mês corrente/passado = urgente a faturar
+  // (o Zoho cobra este mês e o cliente pode ainda não estar faturado).
+  const isUrgentRenewal = (mi) => data.fiscal_year < curY || (data.fiscal_year === curY && mi <= curMi);
   for (const it of (data.licence_renewals?.items || []).filter((l) => l.counted)) {
-    rows.push({ month: it.month, mi: MONTHS.indexOf(it.month), client: it.client, doc: `Renovação ${it.service || ""}`, amount: it.amount, kind: "renovacao" });
+    const mi = MONTHS.indexOf(it.month);
+    rows.push({ month: it.month, mi, client: it.client, doc: `Renovação ${it.service || ""}`, amount: it.amount, kind: "renovacao", overdue: isUrgentRenewal(mi) });
   }
   // Recorrentes previstos (meses em forecast)
   for (const c of data.recurring_forecast?.clients || []) {
@@ -273,8 +276,10 @@ function InvoiceDetail({ data }) {
                     <td style={{ padding: "7px 10px", color: C.text }}>{it.client || "—"}</td>
                     <td style={{ padding: "7px 10px", color: C.muted }}>{it.doc || "—"}</td>
                     <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>
-                      {it.kind === "so" && it.overdue ? (
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: C.redLight, color: C.red }}>⚠ Atrasado a faturar</span>
+                      {it.overdue && (it.kind === "so" || it.kind === "renovacao") ? (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: C.redLight, color: C.red }}>
+                          {it.kind === "renovacao" ? "⚠ Renovação a faturar" : "⚠ Atrasado a faturar"}
+                        </span>
                       ) : (
                         <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: k.bg, color: k.color }}>{k.label}</span>
                       )}
