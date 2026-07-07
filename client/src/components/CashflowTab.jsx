@@ -123,42 +123,60 @@ function Row({ label, cells, total, bold, color, indent = 0, italic, clickable, 
   );
 }
 
-function CostBreakdown({ data, rows, budget }) {
-  // Categorias reais agregadas do Books por mês + fallback orçamento.
+function CostBreakdown({ data, rows, which, budget }) {
+  const mapKey = which === "cogs" ? "cogs_by_month" : "opex_by_month";
   const cats = useMemo(() => {
     const set = new Set();
     for (const m of MONTHS) {
-      const bc = data.expenses?.actual_by_month?.[m]?.by_category || {};
+      const bc = data.expenses?.[mapKey]?.[m]?.by_category || {};
       Object.keys(bc).forEach((k) => set.add(k));
     }
     return [...set].sort();
-  }, [data]);
+  }, [data, mapKey]);
 
-  if (!cats.length) {
+  const rowsOut = cats.map((cat) => {
+    const perMonth = MONTHS.map((m) => data.expenses?.[mapKey]?.[m]?.by_category?.[cat] || 0);
+    const tot = perMonth.reduce((a, b) => a + b, 0);
     return (
-      <Row indent={16} color={C.muted} italic
-        label="Sem despesas reais no Books — a usar orçamento previsto"
-        cells={rows.map((r) => "-" + fmtK(r.expenseBudget))}
-        total={"-" + fmt(rows.reduce((a, r) => a + r.expenseBudget, 0))}
+      <Row key={cat} indent={16} color={C.muted}
+        label={cat}
+        cells={perMonth.map((v) => (v ? "-" + fmtK(v) : "—"))}
+        total={"-" + fmt(tot)}
       />
     );
-  }
+  });
 
-  return (
-    <>
-      {cats.map((cat) => {
-        const perMonth = MONTHS.map((m) => data.expenses?.actual_by_month?.[m]?.by_category?.[cat] || 0);
-        const tot = perMonth.reduce((a, b) => a + b, 0);
-        return (
-          <Row key={cat} indent={16} color={C.muted}
-            label={cat}
-            cells={perMonth.map((v) => (v ? "-" + fmtK(v) : "—"))}
-            total={"-" + fmt(tot)}
-          />
-        );
-      })}
-    </>
-  );
+  // Opex: mostrar também o orçamento previsto usado nos meses futuros.
+  if (which === "opex" && budget) {
+    const anyForecast = rows.some((r) => !r.isPast);
+    if (anyForecast) {
+      rowsOut.push(
+        <Row key="__budget" indent={16} color={C.faint} italic
+          label="Orçamento previsto (meses futuros)"
+          cells={rows.map((r) => (!r.isPast ? "-" + fmtK(r.opexBudget) : "—"))}
+          total={"-" + fmt(rows.filter((r) => !r.isPast).reduce((a, r) => a + r.opexBudget, 0))}
+        />
+      );
+    }
+  }
+  if (which === "cogs") {
+    const anyForecast = rows.some((r) => !r.isPast && r.cogsForecast > 0);
+    if (anyForecast) {
+      rowsOut.push(
+        <Row key="__cogsfc" indent={16} color={C.faint} italic
+          label="Compra prevista de licenças (futuro)"
+          cells={rows.map((r) => (!r.isPast && r.cogsForecast ? "-" + fmtK(r.cogsForecast) : "—"))}
+          total={"-" + fmt(rows.filter((r) => !r.isPast).reduce((a, r) => a + r.cogsForecast, 0))}
+        />
+      );
+    }
+  }
+  if (!rowsOut.length) {
+    return (
+      <Row indent={16} color={C.muted} italic label="Sem movimentos" cells={rows.map(() => "—")} total="—" />
+    );
+  }
+  return <>{rowsOut}</>;
 }
 
 function RevenueBreakdown({ rows }) {
@@ -249,6 +267,7 @@ export default function CashflowTab({ data, budget }) {
   const model = useMemo(() => deriveMonthly(data, budget), [data, budget]);
   const { rows, totals } = model;
   const [openRev, setOpenRev] = useState(false);
+  const [openCogs, setOpenCogs] = useState(false);
   const [openCost, setOpenCost] = useState(false);
   const monthlyGoal = budget.monthly_goal || Math.round((budget.annual_goal || 0) / 12);
 
@@ -285,15 +304,29 @@ export default function CashflowTab({ data, budget }) {
             {openRev && <RevenueBreakdown rows={rows} />}
 
             <Row
-              label="Despesa (real / orçamento)" bold
-              clickable open={openCost} onToggle={() => setOpenCost(!openCost)}
-              cells={rows.map((r) => <span style={{ color: C.red }}>-{fmtK(r.expense)}</span>)}
-              total={<span style={{ color: C.red, fontWeight: 700 }}>-{fmt(totals.expense)}</span>}
+              label="− Compra de licenças (COGS Zoho)" bold
+              clickable open={openCogs} onToggle={() => setOpenCogs(!openCogs)}
+              cells={rows.map((r) => (r.cogs ? <span style={{ color: C.orange }}>-{fmtK(r.cogs)}</span> : <span style={{ color: C.faint }}>—</span>))}
+              total={<span style={{ color: C.orange, fontWeight: 700 }}>-{fmt(totals.cogs)}</span>}
             />
-            {openCost && <CostBreakdown data={data} rows={rows} budget={budget} />}
+            {openCogs && <CostBreakdown data={data} rows={rows} which="cogs" />}
 
             <Row
-              label="Resultado Líquido" bold
+              label="= Margem bruta" bold color={C.muted}
+              cells={rows.map((r) => <span style={{ color: r.grossMargin >= 0 ? C.greenText : C.red }}>{fmtK(r.grossMargin)}</span>)}
+              total={<span style={{ color: totals.grossMargin >= 0 ? C.greenText : C.red, fontWeight: 700 }}>{fmt(totals.grossMargin)}</span>}
+            />
+
+            <Row
+              label="− Opex operacional (real / orçamento)" bold
+              clickable open={openCost} onToggle={() => setOpenCost(!openCost)}
+              cells={rows.map((r) => <span style={{ color: C.red }}>-{fmtK(r.opex)}</span>)}
+              total={<span style={{ color: C.red, fontWeight: 700 }}>-{fmt(totals.opex)}</span>}
+            />
+            {openCost && <CostBreakdown data={data} rows={rows} which="opex" budget={budget} />}
+
+            <Row
+              label="= Resultado Líquido" bold
               cells={rows.map((r) => (
                 <span style={{ color: r.net >= 0 ? C.greenText : C.red, fontWeight: 700 }}>{fmtK(r.net)}</span>
               ))}
@@ -315,9 +348,8 @@ export default function CashflowTab({ data, budget }) {
       <InvoiceDetail data={data} />
 
       <div style={{ marginTop: 12, padding: 12, background: C.surfaceAlt, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, color: C.muted, lineHeight: 1.6 }}>
-        <strong style={{ color: C.text }}>Como ler:</strong> a faturação de meses passados vem das faturas reais do Zoho Books;
-        os meses futuros somam o backlog de SOs abertas, as renovações Zoho ainda sem SO e os contratos recorrentes ainda não faturados —
-        <strong> sem sobreposições</strong>. A despesa passada é o gasto real do Books (bills + expenses); a futura usa o orçamento recorrente.
+        <strong style={{ color: C.text }}>Como ler:</strong> faturação = faturas reais (passado) + SOs adjudicados por faturar + renovações Zoho sem SO + recorrentes previstos (futuro), <strong>sem sobreposições</strong> e filtrado ao ano.
+        A <strong>compra de licenças (COGS Zoho)</strong> é o pass-through pago ao Zoho — real no passado, previsto no futuro (reseller_price) — separada do <strong>opex</strong> operacional. Margem bruta = faturação − COGS; líquido = margem bruta − opex.
       </div>
     </div>
   );

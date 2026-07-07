@@ -36,14 +36,36 @@ module.exports = {
 
   zoho_licence_margin: 1.18,
 
-  // Palavras-chave para classificar linhas de SO/fatura como LICENÇA (o resto é
-  // tratado como SERVIÇO por omissão — trabalho/consultoria não tem COGS).
+  // Classificação de linhas de SO/fatura em LICENÇA vs SERVIÇO.
+  // Regra: se a linha bate numa service_keyword → SERVIÇO (mesmo que mencione um
+  // produto Zoho, ex.: "Implementação CRM"); senão, se bate numa licence_keyword
+  // → LICENÇA; caso contrário → SERVIÇO (default, trabalho sem COGS).
+  // NB: removidas as palavras soltas (crm, one, sign, books, desk…) que geravam
+  // falsos positivos ("Sign-off" → "sign", "Implementação CRM" → "crm").
   licence_keywords: [
-    "zoho", "licen", "licence", "license", "subscription", "subscri", "renova",
-    "renewal", "crm", "bigin", "books", "desk", "projects", "people", "recruit",
-    "fsm", "analytics", "campaigns", "marketing plus", "workdrive", "sign",
-    "vault", "assist", "salesiq", "creator", "one plan", "zoho one", "cliq",
-    "flow", "forms", "survey", "social", "backstage", "commerce",
+    "zoho", "licen", "licence", "license", "subscription", "subscri",
+    "renova", "renewal", "avença anual",
+  ],
+  service_keywords: [
+    "implementa", "desenvolv", "consultor", "setup", "instala", "integra",
+    "formaç", "training", "migra", "suporte", "support", "projeto", "project",
+    "sign-off", "sign off", "close", "instalment", "instalação", "configura",
+    "hora", "serviço", "service", "onboarding", "workshop",
+  ],
+
+  // Entidades próprias (subscrições Zoho da própria empresa) — nunca contam como
+  // receita de renovações; são custo interno.
+  own_entity_patterns: ["transformatiive"],
+
+  // Despesa: categorias do Books tratadas como COGS de licenças (pass-through
+  // Zoho), separadas do overhead operacional.
+  cogs_expense_categories: ["Licenças Zoho", "Custo de produtos vendidos"],
+  // Dentro do saco "Licenciamento" (débitos PayPal etc.), classificar por rótulo:
+  cogs_label_keywords: ["zoho"],
+  // Ferramentas próprias (opex de software, não COGS de revenda):
+  opex_software_keywords: [
+    "openai", "chatgpt", "anthropic", "claude", "replit", "github", "vercel",
+    "cursor", "render", "railway", "supabase", "gpt", "notion", "figma", "google",
   ],
 
   // Clientes com receita recorrente contratada (avença mensal). Usados só como

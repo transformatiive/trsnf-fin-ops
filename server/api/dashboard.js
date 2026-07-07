@@ -32,14 +32,28 @@ function sumTotals(byMonth) {
 }
 
 // ─── Line-item classification: licença vs serviço ────────────────────────────
-function isLicenceText(txt) {
-  const t = (txt || "").toLowerCase();
-  return config.licence_keywords.some((k) => t.includes(k));
+// Serviço vence (trabalho não tem COGS), depois licença, senão serviço.
+function classifyLine(li) {
+  const txt = `${li.name || ""} ${li.description || ""}`.toLowerCase();
+  if ((config.service_keywords || []).some((k) => txt.includes(k))) return "service";
+  if ((config.licence_keywords || []).some((k) => txt.includes(k))) return "licence";
+  return "service";
 }
 
-function classifyLine(li) {
-  const txt = `${li.name || ""} ${li.description || ""} ${li.item_type || ""}`;
-  return isLicenceText(txt) ? "licence" : "service";
+function isOwnEntity(name) {
+  const n = (name || "").toLowerCase();
+  return (config.own_entity_patterns || []).some((p) => n.includes(p));
+}
+
+const MONTHLY_CLIENT_MATCHERS = {
+  hifly: (n) => n.includes("hi fly") || n.includes("hifly"),
+  unicenter: (n) => n.includes("unicenter"),
+  yourbranding: (n) => n.includes("yourbranding") || n.includes("your branding") || n.includes("your orange"),
+  art: (n) => n.includes("automated retail") || n.includes("automated rt"),
+};
+function matchesMonthlyClient(name) {
+  const n = (name || "").toLowerCase();
+  return config.monthly_clients.some((c) => (MONTHLY_CLIENT_MATCHERS[c.key] || (() => false))(n));
 }
 
 function splitLineItems(lineItems) {
@@ -129,7 +143,7 @@ async function buildInvoiced(year) {
 }
 
 // ─── POR FATURAR (open SO backlog, split serviços/licenças) ──────────────────
-async function buildToInvoice() {
+async function buildToInvoice(year) {
   const [open, partial] = await Promise.all([
     books.fetchSalesOrders("open").catch(() => []),
     books.fetchSalesOrders("partially_invoiced").catch(() => []),
@@ -170,8 +184,12 @@ async function buildToInvoice() {
     const remaining = total - invoicedAmt;
     if (remaining <= 0.01) continue;
 
-    const mk = monthKey(so.shipment_date || so.date) || monthKey(so.date);
+    const dateStr = so.shipment_date || so.date;
+    const mk = monthKey(dateStr);
     if (!mk) continue;
+    // Só o ano fiscal selecionado (evita SOs de outro ano na vista).
+    const soYear = new Date(dateStr).getFullYear();
+    if (soYear !== year) continue;
 
     // Split remaining pro-rata by the SO's services/licences composition.
     const { services: svcFull, licences: licFull } = splitLineItems(so.line_items);
@@ -207,17 +225,25 @@ async function buildToInvoice() {
 }
 
 // ─── RENOVAÇÕES ZOHO (Partner Store) ─────────────────────────────────────────
-async function buildLicenceRenewals(booksSoCustomers) {
-  const byMonth = {};
-  MONTHS.forEach((m) => (byMonth[m] = 0));
+const normName = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+async function buildLicenceRenewals(booksSoCustomers, year) {
+  const byMonth = {};              // receita cliente das renovações contadas
+  const resellerByMonth = {};      // custo reseller (COGS) dessas mesmas renovações
+  MONTHS.forEach((m) => { byMonth[m] = 0; resellerByMonth[m] = 0; });
   const items = [];
   let alreadyInBooksTotal = 0;
+  let ownTotal = 0;                // subscrições próprias (custo interno, não receita)
+  let recurringOverlapTotal = 0;   // já cobertas por recurring_forecast
+
+  const soNorm = new Set([...(booksSoCustomers || [])].map(normName));
 
   try {
     const subs = await partner.fetchAllSubscriptions();
     const now = new Date();
-    const horizon = new Date();
-    horizon.setDate(horizon.getDate() + 365);
+    const yStart = new Date(Date.UTC(year, 0, 1));
+    const yEnd = new Date(Date.UTC(year, 11, 31, 23, 59, 59));
+    const lower = now > yStart ? now : yStart; // não incluir renovações já passadas
 
     for (const sub of subs) {
       const st = (sub.status || "").toLowerCase();
@@ -228,7 +254,10 @@ async function buildLicenceRenewals(booksSoCustomers) {
         sub.expires_on || sub.expiry_date || sub.end_date;
       if (!renewalRaw) continue;
       const d = renewalRaw.includes("T") ? new Date(renewalRaw) : new Date(renewalRaw + "T00:00:00Z");
-      if (isNaN(d) || d < now || d > horizon) continue;
+      if (isNaN(d)) continue;
+      // Só renovações do ANO fiscal selecionado (e ainda futuras). Corrige o bug
+      // de renovações de 2027 aparecerem na vista de 2026.
+      if (d < lower || d > yEnd) continue;
 
       const origCurrency = (sub.currency || "EUR").toUpperCase();
       const origAmount = Number(
@@ -244,7 +273,9 @@ async function buildLicenceRenewals(booksSoCustomers) {
       const service =
         sub.service_name || sub.product_name || sub.plan_name || sub.plan_code || sub.service || "—";
 
-      const alreadyInBooks = booksSoCustomers && booksSoCustomers.has(clientName);
+      const isOwn = isOwnEntity(clientName);
+      const isRecurring = matchesMonthlyClient(clientName);
+      const alreadyInBooks = soNorm.has(normName(clientName));
 
       items.push({
         store: sub._store,
@@ -259,15 +290,18 @@ async function buildLicenceRenewals(booksSoCustomers) {
         orig_currency: origCurrency,
         renewal_date: renewalRaw,
         already_in_books: !!alreadyInBooks,
+        is_own: isOwn,
+        is_recurring: isRecurring,
+        counted: !(isOwn || isRecurring || alreadyInBooks),
         status: sub.status || "live",
       });
 
-      // Only count renewals NOT already captured as a Books SO (avoids double count).
-      if (alreadyInBooks) {
-        alreadyInBooksTotal += clientPrice;
-      } else {
-        byMonth[mk] += clientPrice;
-      }
+      // Exclusões (evitam dupla contagem / receita falsa):
+      if (isOwn) { ownTotal += clientPrice; continue; }                    // própria empresa
+      if (isRecurring) { recurringOverlapTotal += clientPrice; continue; } // já em recurring_forecast
+      if (alreadyInBooks) { alreadyInBooksTotal += clientPrice; continue; }// já adjudicado (SO)
+      byMonth[mk] += clientPrice;
+      resellerByMonth[mk] += resellerPriceEUR;
     }
   } catch (err) {
     console.error("Partner subs error:", err.message);
@@ -275,9 +309,12 @@ async function buildLicenceRenewals(booksSoCustomers) {
 
   return {
     by_month: byMonth,
+    reseller_by_month: resellerByMonth,
     items: items.sort((a, b) => MONTHS.indexOf(a.month) - MONTHS.indexOf(b.month)),
     total: Math.round(MONTHS.reduce((a, m) => a + byMonth[m], 0)),
     already_in_books_total: Math.round(alreadyInBooksTotal),
+    own_total: Math.round(ownTotal),
+    recurring_overlap_total: Math.round(recurringOverlapTotal),
   };
 }
 
@@ -328,19 +365,34 @@ function buildRecurringForecast(invoiced, year) {
 }
 
 // ─── DESPESA REAL (Books bills + expenses, by date) ──────────────────────────
+// Classifica uma despesa como COGS de licenças (pass-through Zoho) ou opex.
+function isCogsExpense(category, label) {
+  if ((config.cogs_expense_categories || []).includes(category)) return true;
+  const txt = `${category || ""} ${label || ""}`.toLowerCase();
+  // Ferramentas próprias → opex (mesmo dentro de "Licenciamento").
+  if ((config.opex_software_keywords || []).some((k) => txt.includes(k))) return false;
+  if ((config.cogs_label_keywords || []).some((k) => txt.includes(k))) return true;
+  return false;
+}
+
 async function buildExpenses(year) {
   const [bills, expenses] = await Promise.all([
     books.fetchBills(year).catch(() => []),
     books.fetchExpenses(year).catch(() => []),
   ]);
 
-  const byMonth = emptyByMonth({ by_category: {} });
+  const byMonth = emptyByMonth({ by_category: {} });   // total (compat)
+  const cogsByMonth = emptyByMonth({ by_category: {} }); // COGS licenças
+  const opexByMonth = emptyByMonth({ by_category: {} }); // overhead operacional
 
   const add = (mk, amount, category, label, source) => {
     if (!mk || !(amount > 0)) return;
-    byMonth[mk].total += amount;
-    byMonth[mk].by_category[category] = (byMonth[mk].by_category[category] || 0) + amount;
-    byMonth[mk].items.push({ amount, category, label, source });
+    const bucket = isCogsExpense(category, label) ? cogsByMonth : opexByMonth;
+    for (const target of [byMonth, bucket]) {
+      target[mk].total += amount;
+      target[mk].by_category[category] = (target[mk].by_category[category] || 0) + amount;
+      target[mk].items.push({ amount, category, label, source });
+    }
   };
 
   for (const b of bills) {
@@ -353,19 +405,49 @@ async function buildExpenses(year) {
     add(mk, Number(e.total || 0), cat, e.description || cat, "expense");
   }
 
-  // Round category maps.
-  for (const m of MONTHS) {
-    for (const k of Object.keys(byMonth[m].by_category)) {
-      byMonth[m].by_category[k] = Math.round(byMonth[m].by_category[k]);
+  for (const map of [byMonth, cogsByMonth, opexByMonth]) {
+    for (const m of MONTHS) {
+      for (const k of Object.keys(map[m].by_category)) {
+        map[m].by_category[k] = Math.round(map[m].by_category[k]);
+      }
     }
   }
 
   return {
     actual_by_month: byMonth,
+    cogs_by_month: cogsByMonth,
+    opex_by_month: opexByMonth,
     actual_total: sumTotals(byMonth),
+    cogs_total: sumTotals(cogsByMonth),
+    opex_total: sumTotals(opexByMonth),
     bills_count: bills.length,
     expenses_count: expenses.length,
   };
+}
+
+// Forecast de compra de licenças ao Zoho (COGS) para meses futuros do ano fiscal.
+// = custo reseller das renovações contadas + COGS das licenças em SO + COGS dos
+//   recorrentes previstos. Só para meses sem despesa real ainda (futuro).
+function buildLicenceCogsForecast(licence_renewals, to_invoice, recurring_forecast, year) {
+  const byMonth = {};
+  MONTHS.forEach((m) => (byMonth[m] = 0));
+  const margin = config.zoho_licence_margin || 1.18;
+
+  for (const m of MONTHS) {
+    // Renovações Zoho contadas → custo reseller real.
+    byMonth[m] += licence_renewals.reseller_by_month?.[m] || 0;
+    // Licenças em SO adjudicadas → COGS = valor licença / margem.
+    byMonth[m] += (to_invoice.by_month?.[m]?.licences || 0) / margin;
+  }
+  // Recorrentes previstos: parte-licença de cada cliente / margem.
+  for (const c of recurring_forecast.clients || []) {
+    const share = c.licence_share != null ? c.licence_share : 1;
+    for (const m of MONTHS) {
+      if (c.months[m] === "forecast") byMonth[m] += (c.monthly * share) / margin;
+    }
+  }
+  MONTHS.forEach((m) => (byMonth[m] = Math.round(byMonth[m])));
+  return { by_month: byMonth, total: Math.round(MONTHS.reduce((a, m) => a + byMonth[m], 0)) };
 }
 
 // ─── ORCHESTRATION ───────────────────────────────────────────────────────────
@@ -380,12 +462,13 @@ async function buildDashboard(year) {
 
   const [{ invoiced, paid, receivable }, to_invoice, licence_renewals, expenses] = await Promise.all([
     buildInvoiced(year),
-    buildToInvoice(),
-    buildLicenceRenewals(booksSoCustomers),
+    buildToInvoice(year),
+    buildLicenceRenewals(booksSoCustomers, year),
     buildExpenses(year),
   ]);
 
   const recurring_forecast = buildRecurringForecast(invoiced, year);
+  const licence_cogs_forecast = buildLicenceCogsForecast(licence_renewals, to_invoice, recurring_forecast, year);
 
   const totals = {
     invoiced: sumTotals(invoiced),
@@ -396,10 +479,14 @@ async function buildDashboard(year) {
     to_invoice_services: to_invoice.services_total,
     to_invoice_licences: to_invoice.licences_total,
     licence_renewals: licence_renewals.total,
+    licence_renewals_own: licence_renewals.own_total,
     recurring_forecast: recurring_forecast.total,
     expenses_actual: expenses.actual_total,
+    expenses_cogs: expenses.cogs_total,
+    expenses_opex: expenses.opex_total,
+    licence_cogs_forecast: licence_cogs_forecast.total,
   };
-  // Faturação total prevista (sem sobreposição): já faturado + backlog de SOs +
+  // Faturação total prevista (sem sobreposição): já faturado + SOs adjudicados +
   // renovações Zoho ainda sem SO + recorrentes previstos para meses futuros.
   totals.forecast_billing =
     totals.invoiced + totals.to_invoice + totals.licence_renewals + totals.recurring_forecast;
@@ -420,6 +507,7 @@ async function buildDashboard(year) {
     to_invoice,
     licence_renewals,
     recurring_forecast,
+    licence_cogs_forecast,
     expenses,
     totals,
   };

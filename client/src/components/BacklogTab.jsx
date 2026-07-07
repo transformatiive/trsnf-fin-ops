@@ -181,13 +181,31 @@ function RenewalsSection({ data }) {
   );
 }
 
+function ForecastDealsPlaceholder() {
+  return (
+    <div style={{ background: C.surfaceAlt, border: `1px dashed ${C.borderStrong}`, borderRadius: 10, padding: 16, marginBottom: 20 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Deals previstos (ainda não adjudicados)</div>
+      <div style={{ fontSize: 12, color: C.muted, marginTop: 4, lineHeight: 1.6 }}>
+        Secção reservada para oportunidades em pipeline <strong>ainda não adjudicadas</strong> (fora dos SOs, que são faturação já adjudicada).
+        A definir contigo — entrada manual ou fonte a decidir; sem ligação ao CRM.
+      </div>
+    </div>
+  );
+}
+
 export default function BacklogTab({ data }) {
   return (
     <div>
+      <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+        <strong style={{ color: C.text }}>Por Faturar</strong> = Sales Orders adjudicados mas ainda não faturados (faturação prevista), por mês do SO.
+      </div>
       <ToInvoiceSection data={data} />
       <ReceivableSection data={data} />
       <div style={{ fontSize: 13, fontWeight: 600, color: C.text, margin: "4px 0 12px" }}>Renovações Zoho (Partner Store)</div>
       <RenewalsSection data={data} />
+      <div style={{ marginTop: 20 }}>
+        <ForecastDealsPlaceholder />
+      </div>
     </div>
   );
 }

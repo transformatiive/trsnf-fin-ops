@@ -43,23 +43,29 @@ export function deriveMonthly(data, budget) {
     const revenueForecast = backlog + renewals + recurring;
     const revenue = revenueActual + revenueForecast;
 
-    const expenseActual = data.expenses?.actual_by_month?.[m]?.total || 0;
-    const expenseBudget = fixedCostsForMonth(m, budget) + oneOffForMonth(m, budget);
+    // Despesa separada: COGS de licenças (compra ao Zoho) vs opex operacional.
+    const cogsActual = data.expenses?.cogs_by_month?.[m]?.total || 0;
+    const opexActual = data.expenses?.opex_by_month?.[m]?.total || 0;
+    const cogsForecast = data.licence_cogs_forecast?.by_month?.[m] || 0;
+    const opexBudget = fixedCostsForMonth(m, budget) + oneOffForMonth(m, budget);
 
     const isPast = i <= curIdx;
-    // Passado/corrente → despesa real do Books (se ainda não sincronizada, cai no orçamento).
-    // Futuro → orçamento previsto.
-    const expense = isPast ? (expenseActual > 0 ? expenseActual : expenseBudget) : expenseBudget;
+    // Passado/corrente → real do Books (se não sincronizado, cai no orçamento/forecast).
+    // Futuro → opex orçamentado + COGS previsto (compra de licenças).
+    const opex = isPast ? (opexActual > 0 ? opexActual : opexBudget) : opexBudget;
+    const cogs = isPast ? cogsActual : cogsForecast;
+    const expense = opex + cogs;
 
     const net = revenue - expense;
+    const grossMargin = revenue - cogs; // margem antes de overhead
 
     return {
       month: m, i, isPast,
       invoiced, paid,
       backlog, backlogSvc, backlogLic, renewals, recurring,
       revenueActual, revenueForecast, revenue,
-      expenseActual, expenseBudget, expense,
-      net,
+      cogsActual, opexActual, cogsForecast, opexBudget,
+      opex, cogs, expense, net, grossMargin,
     };
   });
 
@@ -70,9 +76,10 @@ export function deriveMonthly(data, budget) {
     revenue: sum((r) => r.revenue),
     revenueActual: sum((r) => r.revenueActual),
     revenueForecast: sum((r) => r.revenueForecast),
-    expenseActual: sum((r) => r.expenseActual),
-    expenseBudget: sum((r) => r.expenseBudget),
+    cogs: sum((r) => r.cogs),
+    opex: sum((r) => r.opex),
     expense: sum((r) => r.expense),
+    grossMargin: sum((r) => r.grossMargin),
     net: sum((r) => r.net),
   };
 
